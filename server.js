@@ -351,11 +351,15 @@ app.get('/*', async (req, res) => {
     // 쿼리 파라미터에서 baseUrl 확인 (선택사항, 없으면 환경변수 또는 기본값 사용)
     const customBaseUrl = req.query.baseUrl || process.env.BASE_URL || BASE_URL;
 
+    // 성능 측정 시작
+    const startTime = performance.now();
+
     // 이미지 URL과 설정 JSON URL 생성
     const imageUrl = buildResourceUrl(customBaseUrl, bucketName, imagePath);
     const configUrl = buildResourceUrl(customBaseUrl, bucketName, configKey);
 
     // 설정과 이미지 가져오기 (병렬)
+    const fetchStart = performance.now();
     const [configRes, imageRes] = await Promise.all([
       fetch(configUrl).then(r => {
         if (!r.ok) throw new Error(`설정 파일을 가져올 수 없습니다: ${configUrl} (${r.status})`);
@@ -371,6 +375,8 @@ app.get('/*', async (req, res) => {
       configRes.json(),
       imageRes.arrayBuffer()
     ]);
+    const fetchTime = performance.now() - fetchStart;
+    console.log(`[성능] HTTP 요청: ${fetchTime.toFixed(2)}ms`);
 
     // config 파싱 (폰트 URL 계산을 위해 먼저 처리)
     const {
@@ -391,6 +397,7 @@ app.get('/*', async (req, res) => {
     const fontUrl = fontPath ? buildResourceUrl(customBaseUrl, bucketName, fontPath) : null;
 
     // 이미지 로드와 폰트 로드를 병렬 처리
+    const loadStart = performance.now();
     const [image, fontLoaded] = await Promise.all([
       loadImage(Buffer.from(imageBuffer)),
       fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').catch(err => {
@@ -400,8 +407,11 @@ app.get('/*', async (req, res) => {
         return null; // 폰트 로드 실패해도 계속 진행
       }) : Promise.resolve(null)
     ]);
+    const loadTime = performance.now() - loadStart;
+    console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
 
     // Canvas 생성
+    const canvasStart = performance.now();
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(image, 0, 0, width, height);
@@ -456,9 +466,17 @@ app.get('/*', async (req, res) => {
       // 텍스트 그리기
       drawTextOnCanvas(ctx, text, style);
     });
+    const canvasTime = performance.now() - canvasStart;
+    console.log(`[성능] Canvas 작업: ${canvasTime.toFixed(2)}ms`);
 
     // WebP 변환 (quality: 1 - 최고 품질)
+    const webpStart = performance.now();
     const buffer = canvas.toBuffer('image/webp', { quality: 1 });
+    const webpTime = performance.now() - webpStart;
+    console.log(`[성능] WebP 변환: ${webpTime.toFixed(2)}ms`);
+
+    const totalTime = performance.now() - startTime;
+    console.log(`[성능] 총 처리 시간: ${totalTime.toFixed(2)}ms (${buffer.length} bytes)\n`);
 
     // 응답 전송
     res.setHeader('Content-Type', 'image/webp');
