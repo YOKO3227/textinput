@@ -1,0 +1,13 @@
+node_modules/
+.env
+*.log
+.DS_Store
+.font_cache/
+temp_fonts/
+package-lock.json
+yarn.lock
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
