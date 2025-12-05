@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 // 환경 변수 또는 기본값 설정
 const BASE_URL = process.env.BASE_URL || 'https://o.nfarmer.uk';
+const DEBUG = process.env.DEBUG === 'true' || false;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -297,7 +298,7 @@ function createErrorImage(message) {
     ctx.fillText(line, 400, y);
   }
   
-  return canvas.toBuffer('image/png');
+  return canvas.toBuffer('image/webp', { quality: 1 });
 }
 
 /**
@@ -372,7 +373,9 @@ app.get('/*', async (req, res) => {
       imageRes.arrayBuffer()
     ]);
     const fetchTime = performance.now() - fetchStart;
-    console.log(`[성능] HTTP 요청: ${fetchTime.toFixed(2)}ms`);
+    if (DEBUG) {
+      console.log(`[성능] HTTP 요청: ${fetchTime.toFixed(2)}ms`);
+    }
 
     // config 파싱
     const {
@@ -404,7 +407,9 @@ app.get('/*', async (req, res) => {
       }) : Promise.resolve(null)
     ]);
     const loadTime = performance.now() - loadStart;
-    console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
+    if (DEBUG) {
+      console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
+    }
 
     // Canvas 생성
     const canvasStart = performance.now();
@@ -459,19 +464,25 @@ app.get('/*', async (req, res) => {
       drawTextOnCanvas(ctx, text, style);
     });
     const canvasTime = performance.now() - canvasStart;
-    console.log(`[성능] Canvas 작업: ${canvasTime.toFixed(2)}ms`);
+    if (DEBUG) {
+      console.log(`[성능] Canvas 작업: ${canvasTime.toFixed(2)}ms`);
+    }
 
-    // PNG로 변환
-    const pngStart = performance.now();
-    const buffer = canvas.toBuffer('image/png');
-    const pngTime = performance.now() - pngStart;
-    console.log(`[성능] PNG 변환: ${pngTime.toFixed(2)}ms`);
+    // WebP로 변환 (PNG 단계 건너뛰기)
+    const webpStart = performance.now();
+    const buffer = canvas.toBuffer('image/webp', { quality: 1 });
+    const webpTime = performance.now() - webpStart;
+    if (DEBUG) {
+      console.log(`[성능] WebP 변환: ${webpTime.toFixed(2)}ms`);
+    }
 
     const totalTime = performance.now() - startTime;
-    console.log(`[성능] 총 처리 시간: ${totalTime.toFixed(2)}ms (${buffer.length} bytes)\n`);
+    if (DEBUG) {
+      console.log(`[성능] 총 처리 시간: ${totalTime.toFixed(2)}ms (${buffer.length} bytes)\n`);
+    }
 
     // 응답 전송
-    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Type', 'image/webp');
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
@@ -485,7 +496,7 @@ app.get('/*', async (req, res) => {
     const errorBuffer = createErrorImage(error.message);
     
     res.status(500);
-    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Type', 'image/webp');
     res.send(errorBuffer);
   }
 });
