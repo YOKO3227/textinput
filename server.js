@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 3000;
 
 // 환경 변수 또는 기본값 설정
 const BASE_URL = process.env.BASE_URL || 'https://o.nfarmer.uk';
-const DEBUG = process.env.DEBUG === 'true' || false;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -340,10 +339,6 @@ app.get('/*', async (req, res) => {
       return res.status(404).end();
     }
     
-    if (DEBUG) {
-      console.log(`[디버그] originalUrl: ${req.originalUrl}`);
-      console.log(`[디버그] 추출된 pathname: ${pathname}`);
-    }
 
     // 경로 정보 추출
     const { bucketName, imagePath, configDir, configKey } = extractPathInfo(pathname);
@@ -435,11 +430,6 @@ app.get('/*', async (req, res) => {
       return el?.query && queryParams.hasOwnProperty(el.query);
     });
 
-    if (textElements.length === 0 && elements.length > 0 && DEBUG) {
-      console.warn('  경고: 매칭되는 텍스트 요소가 없습니다.');
-      console.warn(`  사용 가능한 쿼리: ${elements.map(e => e.query).join(', ')}`);
-      console.warn(`  받은 쿼리: ${Object.keys(queryParams).join(', ')}`);
-    }
 
     // 텍스트 그리기
     textElements.forEach(element => {
@@ -453,14 +443,7 @@ app.get('/*', async (req, res) => {
       // 텍스트 가져오기 및 디코딩
       const text = decodeText(queryParams[element.query]);
       if (!text) {
-        if (DEBUG) {
-          console.warn(`  경고: ${element.query}에 대한 텍스트가 비어있습니다.`);
-        }
         return;
-      }
-
-      if (DEBUG) {
-        console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
       }
 
       // 텍스트 그리기

@@ -252,3 +252,6 @@ npm run dev
 ## 라이선스
 
 MIT
+
+## githud 푸시 할 때 
+Initial commit for Railway deployment
