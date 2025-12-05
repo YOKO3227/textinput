@@ -372,9 +372,7 @@ app.get('/*', async (req, res) => {
       imageRes.arrayBuffer()
     ]);
 
-    // 이미지 로드 (canvas 패키지는 Buffer를 사용)
-    const image = await loadImage(Buffer.from(imageBuffer));
-
+    // config 파싱 (폰트 URL 계산을 위해 먼저 처리)
     const {
       imageSize = {},
       elements = [],
@@ -383,28 +381,30 @@ app.get('/*', async (req, res) => {
       fontSettings = {}
     } = config;
 
-    const width = imageSize.width || image.width || 800;
-    const height = imageSize.height || image.height || 600;
+    const width = imageSize.width || 800;
+    const height = imageSize.height || 600;
+
+    // 폰트 URL 미리 계산 (폰트가 필요한 경우)
+    const fontPath = fontSettings.mode === 'r2' && fontSettings.r2FontFilename
+      ? `${configDir}/fonts/${fontSettings.r2FontFilename}`
+      : null;
+    const fontUrl = fontPath ? buildResourceUrl(customBaseUrl, bucketName, fontPath) : null;
+
+    // 이미지 로드와 폰트 로드를 병렬 처리
+    const [image, fontLoaded] = await Promise.all([
+      loadImage(Buffer.from(imageBuffer)),
+      fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').catch(err => {
+        console.error(`[폰트] 로드 실패: ${err.message}`);
+        console.error(`[폰트] URL: ${fontUrl}`);
+        console.warn(`[폰트] 기본 폰트를 사용합니다.`);
+        return null; // 폰트 로드 실패해도 계속 진행
+      }) : Promise.resolve(null)
+    ]);
 
     // Canvas 생성
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(image, 0, 0, width, height);
-
-    // 폰트 처리 (Cloudflare Workers 방식 참조)
-    if (fontSettings.mode === 'r2' && fontSettings.r2FontFilename) {
-      // Cloudflare Workers와 동일한 경로 구조: configDir/fonts/fontFileName
-      const fontPath = `${configDir}/fonts/${fontSettings.r2FontFilename}`;
-      const fontUrl = buildResourceUrl(customBaseUrl, bucketName, fontPath);
-      
-      try {
-        await registerFontFromUrl(fontUrl, 'CustomR2Font');
-      } catch (fontError) {
-        console.error(`[폰트] 로드 실패: ${fontError.message}`);
-        console.error(`[폰트] URL: ${fontUrl}`);
-        console.warn(`[폰트] 기본 폰트를 사용합니다.`);
-      }
-    }
 
     // 외부 폰트 처리 (Google Fonts 등)
     // 실제로는 폰트를 다운로드해야 하지만, 여기서는 시스템 폰트 사용
