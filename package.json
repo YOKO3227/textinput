@@ -4,7 +4,7 @@
   "description": "Cloudflare JSON 설정을 사용한 Canvas 이미지 텍스트 오버레이 서비스",
   "main": "server.js",
   "engines": {
-    "node": "18.x"
+    "node": "18.19.0"
   },
   "scripts": {
     "start": "node server.js",
