@@ -39,10 +39,13 @@ const registeredFonts = new Set();
  */
 async function registerFontFromUrl(fontUrl, fontFamily) {
   if (registeredFonts.has(fontFamily)) {
+    console.log(`폰트 이미 등록됨: ${fontFamily}`);
     return; // 이미 등록됨
   }
 
   try {
+    console.log(`[폰트] 등록 시작: ${fontFamily}`);
+    console.log(`[폰트] URL: ${fontUrl}`);
     
     const urlHash = crypto.createHash('md5').update(fontUrl).digest('hex');
     let urlPath;
@@ -59,14 +62,20 @@ async function registerFontFromUrl(fontUrl, fontFamily) {
     let fontBuffer;
     if (fs.existsSync(cacheFile)) {
       fontBuffer = fs.readFileSync(cacheFile);
+      console.log(`[폰트] 캐시에서 로드: ${fontFamily} (${fontBuffer.length} bytes)`);
     } else {
+      console.log(`[폰트] 다운로드 시작: ${fontUrl}`);
       const response = await fetch(fontUrl);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
+      const contentType = response.headers.get('content-type');
+      console.log(`[폰트] Content-Type: ${contentType || 'unknown'}`);
+      
       fontBuffer = Buffer.from(await response.arrayBuffer());
+      console.log(`[폰트] 다운로드 완료: ${fontBuffer.length} bytes`);
       
       if (fontBuffer.length === 0) {
         throw new Error('폰트 파일이 비어있습니다');
@@ -74,12 +83,15 @@ async function registerFontFromUrl(fontUrl, fontFamily) {
       
       // 캐시 저장
       fs.writeFileSync(cacheFile, fontBuffer);
+      console.log(`[폰트] 캐시에 저장: ${cacheFile}`);
     }
 
     // Canvas에 폰트 등록 (@napi-rs/canvas는 GlobalFonts 사용)
+    console.log(`[폰트] Canvas에 등록 중: ${fontFamily}`);
     // @napi-rs/canvas의 GlobalFonts.registerFromPath는 파일 경로와 폰트 패밀리명을 받습니다
     GlobalFonts.registerFromPath(cacheFile, fontFamily);
     registeredFonts.add(fontFamily);
+    console.log(`[폰트] 등록 완료: ${fontFamily}`);
     
   } catch (error) {
     console.error(`[폰트] 등록 실패 (${fontFamily}):`, error.message);
@@ -254,51 +266,38 @@ function createErrorImage(message) {
   const canvas = createCanvas(800, 600);
   const ctx = canvas.getContext('2d');
   
-  // 배경 (밝은 회색)
+  // 배경
   ctx.fillStyle = '#C5C5C5';
   ctx.fillRect(0, 0, 800, 600);
   
+  // 에러 텍스트
   ctx.fillStyle = '#000000';
-  ctx.textAlign = 'center';
-  
-  // 큰 "404" 텍스트
-  ctx.font = 'bold 120px Arial';
-  ctx.fillText('404', 400, 200);
-  
-  // "Not Found" 텍스트
   ctx.font = 'bold 48px Arial';
-  ctx.fillText('Not Found', 400, 280);
+  ctx.textAlign = 'center';
+  ctx.fillText('Error', 400, 250);
   
-  // 한국어 설명 텍스트
   ctx.font = '24px Arial';
-  ctx.fillText('이 이미지는 오류가 발생했을 때 출력되는 이미지입니다.', 400, 360);
-  ctx.fillText('!디버깅 필요.', 400, 400);
+  const maxWidth = 700;
+  const words = message.split(' ');
+  let line = '';
+  let y = 320;
   
-  // 에러 메시지 (있는 경우)
-  if (message && message.length > 0) {
-    ctx.font = '18px Arial';
-    const maxWidth = 750;
-    const words = message.split(' ');
-    let line = '';
-    let y = 450;
-    
-    words.forEach(word => {
-      const testLine = line + (line ? ' ' : '') + word;
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && line) {
-        ctx.fillText(line, 400, y);
-        line = word;
-        y += 25;
-      } else {
-        line = testLine;
-      }
-    });
-    if (line) {
+  words.forEach(word => {
+    const testLine = line + (line ? ' ' : '') + word;
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWidth && line) {
       ctx.fillText(line, 400, y);
+      line = word;
+      y += 30;
+    } else {
+      line = testLine;
     }
+  });
+  if (line) {
+    ctx.fillText(line, 400, y);
   }
   
-  return canvas.toBuffer('image/webp', { quality: 1 });
+  return canvas.toBuffer('image/png');
 }
 
 /**
@@ -339,6 +338,8 @@ app.get('/*', async (req, res) => {
       return res.status(404).end();
     }
     
+    console.log(`[디버그] originalUrl: ${req.originalUrl}`);
+    console.log(`[디버그] 추출된 pathname: ${pathname}`);
 
     // 경로 정보 추출
     const { bucketName, imagePath, configDir, configKey } = extractPathInfo(pathname);
@@ -373,7 +374,7 @@ app.get('/*', async (req, res) => {
     const fetchTime = performance.now() - fetchStart;
     console.log(`[성능] HTTP 요청: ${fetchTime.toFixed(2)}ms`);
 
-    // config 파싱 (폰트 URL 계산을 위해 먼저 처리)
+    // config 파싱
     const {
       imageSize = {},
       elements = [],
@@ -430,6 +431,11 @@ app.get('/*', async (req, res) => {
       return el?.query && queryParams.hasOwnProperty(el.query);
     });
 
+    if (textElements.length === 0 && elements.length > 0) {
+      console.warn('  경고: 매칭되는 텍스트 요소가 없습니다.');
+      console.warn(`  사용 가능한 쿼리: ${elements.map(e => e.query).join(', ')}`);
+      console.warn(`  받은 쿼리: ${Object.keys(queryParams).join(', ')}`);
+    }
 
     // 텍스트 그리기
     textElements.forEach(element => {
@@ -443,8 +449,11 @@ app.get('/*', async (req, res) => {
       // 텍스트 가져오기 및 디코딩
       const text = decodeText(queryParams[element.query]);
       if (!text) {
+        console.warn(`  경고: ${element.query}에 대한 텍스트가 비어있습니다.`);
         return;
       }
+
+      console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
 
       // 텍스트 그리기
       drawTextOnCanvas(ctx, text, style);
@@ -452,17 +461,17 @@ app.get('/*', async (req, res) => {
     const canvasTime = performance.now() - canvasStart;
     console.log(`[성능] Canvas 작업: ${canvasTime.toFixed(2)}ms`);
 
-    // WebP 변환 (quality: 1 - 최고 품질)
-    const webpStart = performance.now();
-    const buffer = canvas.toBuffer('image/webp', { quality: 1 });
-    const webpTime = performance.now() - webpStart;
-    console.log(`[성능] WebP 변환: ${webpTime.toFixed(2)}ms`);
+    // PNG로 변환
+    const pngStart = performance.now();
+    const buffer = canvas.toBuffer('image/png');
+    const pngTime = performance.now() - pngStart;
+    console.log(`[성능] PNG 변환: ${pngTime.toFixed(2)}ms`);
 
     const totalTime = performance.now() - startTime;
     console.log(`[성능] 총 처리 시간: ${totalTime.toFixed(2)}ms (${buffer.length} bytes)\n`);
 
     // 응답 전송
-    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
@@ -476,7 +485,7 @@ app.get('/*', async (req, res) => {
     const errorBuffer = createErrorImage(error.message);
     
     res.status(500);
-    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Content-Type', 'image/png');
     res.send(errorBuffer);
   }
 });
