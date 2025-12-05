@@ -513,31 +513,14 @@ app.get('/*', async (req, res) => {
     console.log('');
     
     // 에러 이미지 URL에서 가져오기
-    try {
-      const errorImageUrl = 'https://pub-45268c10da744ce58e66952c8d0c50ba.r2.dev/404.webp';
-      const errorImageRes = await fetch(errorImageUrl);
-      
-      if (errorImageRes.ok) {
-        const errorBuffer = Buffer.from(await errorImageRes.arrayBuffer());
-        res.status(500);
-        res.setHeader('Content-Type', 'image/webp');
-        res.setHeader('Content-Length', errorBuffer.length);
-        res.send(errorBuffer);
-      } else {
-        // 에러 이미지 URL에서 가져오기 실패 시 생성된 이미지 사용
-        const errorBuffer = createErrorImage(error.message);
-        res.status(500);
-        res.setHeader('Content-Type', 'image/webp');
-        res.send(errorBuffer);
-      }
-    } catch (fetchError) {
-      // fetch 실패 시 생성된 이미지 사용
-      console.error('[에러] 에러 이미지 URL 가져오기 실패:', fetchError.message);
-      const errorBuffer = createErrorImage(error.message);
-      res.status(500);
-      res.setHeader('Content-Type', 'image/webp');
-      res.send(errorBuffer);
-    }
+    const errorImageUrl = 'https://pub-45268c10da744ce58e66952c8d0c50ba.r2.dev/404.webp';
+    const errorImageRes = await fetch(errorImageUrl);
+    const errorBuffer = Buffer.from(await errorImageRes.arrayBuffer());
+    
+    res.status(500);
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Content-Length', errorBuffer.length);
+    res.send(errorBuffer);
   }
 });
 
