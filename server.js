@@ -112,7 +112,110 @@ function decodeText(text) {
 }
 
 /**
- * Canvas에 텍스트 그리기 (여러 줄 지원, 정렬 지원)
+ * RGBA 색상 파싱
+ */
+function parseRGBA(colorStr) {
+  if (!colorStr) return null;
+  
+  // rgba(255,255,255,0.15) 형식
+  const rgbaMatch = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  if (rgbaMatch) {
+    return {
+      r: parseInt(rgbaMatch[1]),
+      g: parseInt(rgbaMatch[2]),
+      b: parseInt(rgbaMatch[3]),
+      a: rgbaMatch[4] ? parseFloat(rgbaMatch[4]) : 1
+    };
+  }
+  
+  // #ffffff 형식
+  const hexMatch = colorStr.match(/#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?/);
+  if (hexMatch) {
+    return {
+      r: parseInt(hexMatch[1].substring(0, 2), 16),
+      g: parseInt(hexMatch[1].substring(2, 4), 16),
+      b: parseInt(hexMatch[1].substring(4, 6), 16),
+      a: hexMatch[2] ? parseInt(hexMatch[2], 16) / 255 : 1
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Padding 파싱 (예: "25px 30px" -> {top: 25, right: 30, bottom: 25, left: 30})
+ */
+function parsePadding(paddingStr) {
+  if (!paddingStr) return { top: 0, right: 0, bottom: 0, left: 0 };
+  
+  const parts = paddingStr.trim().split(/\s+/).map(p => parseFloat(p) || 0);
+  
+  if (parts.length === 1) {
+    return { top: parts[0], right: parts[0], bottom: parts[0], left: parts[0] };
+  } else if (parts.length === 2) {
+    return { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1] };
+  } else if (parts.length === 4) {
+    return { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3] };
+  }
+  
+  return { top: 0, right: 0, bottom: 0, left: 0 };
+}
+
+/**
+ * Border 파싱 (예: "1px solid rgba(255,255,255,0.2)")
+ */
+function parseBorder(borderStr) {
+  if (!borderStr) return null;
+  
+  const match = borderStr.match(/(\d+)px\s+(?:solid|dashed|dotted)\s+(.+)/);
+  if (match) {
+    return {
+      width: parseInt(match[1]),
+      color: match[2]
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * BoxShadow 파싱 (예: "0 8px 32px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1)")
+ */
+function parseBoxShadow(shadowStr) {
+  if (!shadowStr) return [];
+  
+  return shadowStr.split(',').map(shadow => {
+    const parts = shadow.trim().split(/\s+/);
+    if (parts.length >= 4) {
+      const offsetX = parseFloat(parts[0]) || 0;
+      const offsetY = parseFloat(parts[1]) || 0;
+      const blur = parseFloat(parts[2]) || 0;
+      const color = parts.slice(3).join(' ');
+      return { offsetX, offsetY, blur, color };
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+/**
+ * 둥근 모서리 사각형 그리기
+ */
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+/**
+ * Canvas에 텍스트 그리기 (여러 줄 지원, 정렬 지원, 배경/테두리/그림자 지원)
  */
 function drawTextOnCanvas(ctx, text, style) {
   const {
@@ -128,10 +231,84 @@ function drawTextOnCanvas(ctx, text, style) {
     strokeWidth = 0,
     textAlign = 'left',
     lineHeight = 1.2,
-    fontWeight = 'normal'
+    fontWeight = 'normal',
+    backgroundColor,
+    borderRadius = 0,
+    padding,
+    border,
+    boxShadow,
+    backdropFilter
   } = style;
 
   ctx.save();
+
+  // Padding 계산
+  const paddingObj = parsePadding(padding);
+  const contentX = x + paddingObj.left;
+  const contentY = y + paddingObj.top;
+  const contentWidth = w - paddingObj.left - paddingObj.right;
+  const contentHeight = h - paddingObj.top - paddingObj.bottom;
+
+  // BoxShadow 그리기
+  if (boxShadow) {
+    const shadows = parseBoxShadow(boxShadow);
+    shadows.forEach(shadow => {
+      ctx.save();
+      ctx.shadowColor = shadow.color;
+      ctx.shadowBlur = shadow.blur;
+      ctx.shadowOffsetX = shadow.offsetX;
+      ctx.shadowOffsetY = shadow.offsetY;
+      
+      if (borderRadius > 0) {
+        drawRoundedRect(ctx, x, y, w, h, borderRadius);
+      } else {
+        ctx.rect(x, y, w, h);
+      }
+      ctx.fillStyle = 'transparent';
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // BackdropFilter (간단한 블러 효과 - 실제 backdrop-filter는 Canvas에서 직접 지원 안 함)
+  if (backdropFilter) {
+    // backdrop-filter는 복잡하므로 간단한 반투명 오버레이로 대체
+    // 실제 구현은 배경 이미지를 가져와서 블러 처리해야 함
+  }
+
+  // 배경색 그리기
+  if (backgroundColor) {
+    const bgColor = parseRGBA(backgroundColor);
+    if (bgColor) {
+      ctx.fillStyle = `rgba(${bgColor.r}, ${bgColor.g}, ${bgColor.b}, ${bgColor.a})`;
+      
+      if (borderRadius > 0) {
+        drawRoundedRect(ctx, x, y, w, h, borderRadius);
+      } else {
+        ctx.rect(x, y, w, h);
+      }
+      ctx.fill();
+    }
+  }
+
+  // 테두리 그리기
+  if (border) {
+    const borderObj = parseBorder(border);
+    if (borderObj) {
+      const borderColor = parseRGBA(borderObj.color);
+      if (borderColor) {
+        ctx.strokeStyle = `rgba(${borderColor.r}, ${borderColor.g}, ${borderColor.b}, ${borderColor.a})`;
+        ctx.lineWidth = borderObj.width;
+        
+        if (borderRadius > 0) {
+          drawRoundedRect(ctx, x, y, w, h, borderRadius);
+        } else {
+          ctx.rect(x, y, w, h);
+        }
+        ctx.stroke();
+      }
+    }
+  }
 
   // 폰트 설정
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
@@ -143,18 +320,18 @@ function drawTextOnCanvas(ctx, text, style) {
   const lines = text.split('\n');
   const lineHeightPx = fontSize * lineHeight;
 
-  // 자동 줄바꿈 처리
+  // 자동 줄바꿈 처리 (패딩 적용된 너비 사용)
   const measuredLines = [];
   lines.forEach(line => {
     const metrics = ctx.measureText(line);
-    if (metrics.width > w && w > 0) {
+    if (metrics.width > contentWidth && contentWidth > 0) {
       // 자동 줄바꿈
       const words = line.split(' ');
       let currentLine = '';
       words.forEach(word => {
         const testLine = currentLine + (currentLine ? ' ' : '') + word;
         const testMetrics = ctx.measureText(testLine);
-        if (testMetrics.width > w && currentLine) {
+        if (testMetrics.width > contentWidth && currentLine) {
           measuredLines.push(currentLine);
           currentLine = word;
         } else {
@@ -169,20 +346,20 @@ function drawTextOnCanvas(ctx, text, style) {
 
   const totalHeight = measuredLines.length * lineHeightPx;
 
-  // 수직 정렬
-  let startY = y;
+  // 수직 정렬 (패딩 적용된 영역 기준)
+  let startY = contentY;
   if (verticalAlign === 'middle' || verticalAlign === 'center') {
-    startY = y + Math.max(0, (h - totalHeight) / 2);
+    startY = contentY + Math.max(0, (contentHeight - totalHeight) / 2);
   } else if (verticalAlign === 'bottom') {
-    startY = y + Math.max(0, h - totalHeight);
+    startY = contentY + Math.max(0, contentHeight - totalHeight);
   }
 
-  // 수평 정렬
-  let textX = x;
+  // 수평 정렬 (패딩 적용된 영역 기준)
+  let textX = contentX;
   if (textAlign === 'center') {
-    textX = x + w / 2;
+    textX = contentX + contentWidth / 2;
   } else if (textAlign === 'right') {
-    textX = x + w;
+    textX = contentX + contentWidth;
   }
 
   // 각 줄 그리기
