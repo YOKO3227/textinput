@@ -264,41 +264,61 @@ function buildResourceUrl(baseUrl, bucketName, resourcePath) {
  * 에러 이미지 생성
  */
 function createErrorImage(message) {
-  const canvas = createCanvas(800, 600);
-  const ctx = canvas.getContext('2d');
-  
-  // 배경
-  ctx.fillStyle = '#C5C5C5';
-  ctx.fillRect(0, 0, 800, 600);
-  
-  // 에러 텍스트
-  ctx.fillStyle = '#000000';
-  ctx.font = 'bold 48px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText('Error', 400, 250);
-  
-  ctx.font = '24px Arial';
-  const maxWidth = 700;
-  const words = message.split(' ');
-  let line = '';
-  let y = 320;
-  
-  words.forEach(word => {
-    const testLine = line + (line ? ' ' : '') + word;
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && line) {
+  try {
+    const canvas = createCanvas(800, 600);
+    const ctx = canvas.getContext('2d');
+    
+    // 배경
+    ctx.fillStyle = '#C5C5C5';
+    ctx.fillRect(0, 0, 800, 600);
+    
+    // 에러 텍스트
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Error', 400, 250);
+    
+    ctx.font = '24px Arial';
+    const maxWidth = 700;
+    const words = (message || 'Unknown error').split(' ');
+    let line = '';
+    let y = 320;
+    
+    words.forEach(word => {
+      const testLine = line + (line ? ' ' : '') + word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && line) {
+        ctx.fillText(line, 400, y);
+        line = word;
+        y += 30;
+      } else {
+        line = testLine;
+      }
+    });
+    if (line) {
       ctx.fillText(line, 400, y);
-      line = word;
-      y += 30;
-    } else {
-      line = testLine;
     }
-  });
-  if (line) {
-    ctx.fillText(line, 400, y);
+    
+    // WebP 변환 시도, 실패하면 PNG로 fallback
+    try {
+      return canvas.toBuffer('image/webp', { quality: 1 });
+    } catch (webpError) {
+      console.error('[에러 이미지] WebP 변환 실패, PNG로 fallback:', webpError.message);
+      return canvas.toBuffer('image/png');
+    }
+  } catch (error) {
+    // 에러 이미지 생성 자체가 실패한 경우 기본 PNG 반환
+    console.error('[에러 이미지] 생성 실패:', error.message);
+    const canvas = createCanvas(800, 600);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#C5C5C5';
+    ctx.fillRect(0, 0, 800, 600);
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Error', 400, 300);
+    return canvas.toBuffer('image/png');
   }
-  
-  return canvas.toBuffer('image/webp', { quality: 1 });
 }
 
 /**
