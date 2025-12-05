@@ -297,7 +297,7 @@ function createErrorImage(message) {
     ctx.fillText(line, 400, y);
   }
   
-  return canvas.toBuffer('image/png');
+  return canvas.toBuffer('image/webp', { quality: 1 });
 }
 
 /**
@@ -457,13 +457,13 @@ app.get('/*', async (req, res) => {
       drawTextOnCanvas(ctx, text, style);
     });
 
-    // PNG로 변환
-    const buffer = canvas.toBuffer('image/png');
+    // WebP 변환 (quality: 1 - 최고 품질)
+    const buffer = canvas.toBuffer('image/webp', { quality: 1 });
 
-    console.log(`  성공: ${buffer.length} bytes PNG 생성 완료\n`);
+    console.log(`  성공: ${buffer.length} bytes WebP (quality: 1) 생성 완료\n`);
 
     // 응답 전송
-    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Type', 'image/webp');
     res.setHeader('Content-Length', buffer.length);
     res.setHeader('Cache-Control', 'public, max-age=3600');
     res.send(buffer);
@@ -477,7 +477,7 @@ app.get('/*', async (req, res) => {
     const errorBuffer = createErrorImage(error.message);
     
     res.status(500);
-    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Type', 'image/webp');
     res.send(errorBuffer);
   }
 });
