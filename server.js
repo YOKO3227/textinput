@@ -255,35 +255,48 @@ function createErrorImage(message) {
   const canvas = createCanvas(800, 600);
   const ctx = canvas.getContext('2d');
   
-  // 배경
+  // 배경 (밝은 회색)
   ctx.fillStyle = '#C5C5C5';
   ctx.fillRect(0, 0, 800, 600);
   
-  // 에러 텍스트
   ctx.fillStyle = '#000000';
-  ctx.font = 'bold 48px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText('Error', 400, 250);
   
+  // 큰 "404" 텍스트
+  ctx.font = 'bold 120px Arial';
+  ctx.fillText('404', 400, 200);
+  
+  // "Not Found" 텍스트
+  ctx.font = 'bold 48px Arial';
+  ctx.fillText('Not Found', 400, 280);
+  
+  // 한국어 설명 텍스트
   ctx.font = '24px Arial';
-  const maxWidth = 700;
-  const words = message.split(' ');
-  let line = '';
-  let y = 320;
+  ctx.fillText('이 이미지는 오류가 발생했을 때 출력되는 이미지입니다.', 400, 360);
+  ctx.fillText('!디버깅 필요.', 400, 400);
   
-  words.forEach(word => {
-    const testLine = line + (line ? ' ' : '') + word;
-    const metrics = ctx.measureText(testLine);
-    if (metrics.width > maxWidth && line) {
+  // 에러 메시지 (있는 경우)
+  if (message && message.length > 0) {
+    ctx.font = '18px Arial';
+    const maxWidth = 750;
+    const words = message.split(' ');
+    let line = '';
+    let y = 450;
+    
+    words.forEach(word => {
+      const testLine = line + (line ? ' ' : '') + word;
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && line) {
+        ctx.fillText(line, 400, y);
+        line = word;
+        y += 25;
+      } else {
+        line = testLine;
+      }
+    });
+    if (line) {
       ctx.fillText(line, 400, y);
-      line = word;
-      y += 30;
-    } else {
-      line = testLine;
     }
-  });
-  if (line) {
-    ctx.fillText(line, 400, y);
   }
   
   return canvas.toBuffer('image/webp', { quality: 1 });
@@ -444,8 +457,8 @@ app.get('/*', async (req, res) => {
       drawTextOnCanvas(ctx, text, style);
     });
 
-    // WebP 변환 (quality: 0.9 - 최적화된 품질)
-    const buffer = canvas.toBuffer('image/webp', { quality: 0.9 });
+    // WebP 변환 (quality: 1 - 최고 품질)
+    const buffer = canvas.toBuffer('image/webp', { quality: 1 });
 
     // 응답 전송
     res.setHeader('Content-Type', 'image/webp');
