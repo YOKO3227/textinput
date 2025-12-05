@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 // 환경 변수 또는 기본값 설정
 const BASE_URL = process.env.BASE_URL || 'https://o.nfarmer.uk';
+const DEBUG = process.env.DEBUG === 'true' || false;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -39,13 +40,10 @@ const registeredFonts = new Set();
  */
 async function registerFontFromUrl(fontUrl, fontFamily) {
   if (registeredFonts.has(fontFamily)) {
-    console.log(`폰트 이미 등록됨: ${fontFamily}`);
     return; // 이미 등록됨
   }
 
   try {
-    console.log(`[폰트] 등록 시작: ${fontFamily}`);
-    console.log(`[폰트] URL: ${fontUrl}`);
     
     const urlHash = crypto.createHash('md5').update(fontUrl).digest('hex');
     let urlPath;
@@ -62,20 +60,14 @@ async function registerFontFromUrl(fontUrl, fontFamily) {
     let fontBuffer;
     if (fs.existsSync(cacheFile)) {
       fontBuffer = fs.readFileSync(cacheFile);
-      console.log(`[폰트] 캐시에서 로드: ${fontFamily} (${fontBuffer.length} bytes)`);
     } else {
-      console.log(`[폰트] 다운로드 시작: ${fontUrl}`);
       const response = await fetch(fontUrl);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      const contentType = response.headers.get('content-type');
-      console.log(`[폰트] Content-Type: ${contentType || 'unknown'}`);
-      
       fontBuffer = Buffer.from(await response.arrayBuffer());
-      console.log(`[폰트] 다운로드 완료: ${fontBuffer.length} bytes`);
       
       if (fontBuffer.length === 0) {
         throw new Error('폰트 파일이 비어있습니다');
@@ -83,15 +75,12 @@ async function registerFontFromUrl(fontUrl, fontFamily) {
       
       // 캐시 저장
       fs.writeFileSync(cacheFile, fontBuffer);
-      console.log(`[폰트] 캐시에 저장: ${cacheFile}`);
     }
 
     // Canvas에 폰트 등록 (@napi-rs/canvas는 GlobalFonts 사용)
-    console.log(`[폰트] Canvas에 등록 중: ${fontFamily}`);
     // @napi-rs/canvas의 GlobalFonts.registerFromPath는 파일 경로와 폰트 패밀리명을 받습니다
     GlobalFonts.registerFromPath(cacheFile, fontFamily);
     registeredFonts.add(fontFamily);
-    console.log(`[폰트] 등록 완료: ${fontFamily}`);
     
   } catch (error) {
     console.error(`[폰트] 등록 실패 (${fontFamily}):`, error.message);
@@ -338,8 +327,10 @@ app.get('/*', async (req, res) => {
       return res.status(404).end();
     }
     
-    console.log(`[디버그] originalUrl: ${req.originalUrl}`);
-    console.log(`[디버그] 추출된 pathname: ${pathname}`);
+    if (DEBUG) {
+      console.log(`[디버그] originalUrl: ${req.originalUrl}`);
+      console.log(`[디버그] 추출된 pathname: ${pathname}`);
+    }
 
     // 경로 정보 추출
     const { bucketName, imagePath, configDir, configKey } = extractPathInfo(pathname);
@@ -350,10 +341,6 @@ app.get('/*', async (req, res) => {
     // 이미지 URL과 설정 JSON URL 생성
     const imageUrl = buildResourceUrl(customBaseUrl, bucketName, imagePath);
     const configUrl = buildResourceUrl(customBaseUrl, bucketName, configKey);
-
-    console.log(`[${new Date().toISOString()}] 요청 처리:`);
-    console.log(`  이미지 URL: ${imageUrl}`);
-    console.log(`  설정 URL: ${configUrl}`);
 
     // 설정과 이미지 가져오기 (병렬)
     const [configRes, imageRes] = await Promise.all([
@@ -397,16 +384,12 @@ app.get('/*', async (req, res) => {
       const fontPath = `${configDir}/fonts/${fontSettings.r2FontFilename}`;
       const fontUrl = buildResourceUrl(customBaseUrl, bucketName, fontPath);
       
-      console.log(`  폰트 경로: ${fontPath}`);
-      console.log(`  폰트 URL: ${fontUrl}`);
-      
       try {
         await registerFontFromUrl(fontUrl, 'CustomR2Font');
-        console.log(`  ✓ 폰트 로드 성공: ${fontSettings.r2FontFilename}`);
       } catch (fontError) {
-        console.error(`  ✗ 폰트 로드 실패: ${fontError.message}`);
-        console.error(`  ✗ 폰트 URL: ${fontUrl}`);
-        console.warn(`  ⚠ 기본 폰트를 사용합니다.`);
+        console.error(`[폰트] 로드 실패: ${fontError.message}`);
+        console.error(`[폰트] URL: ${fontUrl}`);
+        console.warn(`[폰트] 기본 폰트를 사용합니다.`);
       }
     }
 
@@ -429,7 +412,7 @@ app.get('/*', async (req, res) => {
       return el?.query && queryParams.hasOwnProperty(el.query);
     });
 
-    if (textElements.length === 0 && elements.length > 0) {
+    if (textElements.length === 0 && elements.length > 0 && DEBUG) {
       console.warn('  경고: 매칭되는 텍스트 요소가 없습니다.');
       console.warn(`  사용 가능한 쿼리: ${elements.map(e => e.query).join(', ')}`);
       console.warn(`  받은 쿼리: ${Object.keys(queryParams).join(', ')}`);
@@ -447,20 +430,22 @@ app.get('/*', async (req, res) => {
       // 텍스트 가져오기 및 디코딩
       const text = decodeText(queryParams[element.query]);
       if (!text) {
-        console.warn(`  경고: ${element.query}에 대한 텍스트가 비어있습니다.`);
+        if (DEBUG) {
+          console.warn(`  경고: ${element.query}에 대한 텍스트가 비어있습니다.`);
+        }
         return;
       }
 
-      console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+      if (DEBUG) {
+        console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+      }
 
       // 텍스트 그리기
       drawTextOnCanvas(ctx, text, style);
     });
 
-    // WebP 변환 (quality: 1 - 최고 품질)
-    const buffer = canvas.toBuffer('image/webp', { quality: 1 });
-
-    console.log(`  성공: ${buffer.length} bytes WebP (quality: 1) 생성 완료\n`);
+    // WebP 변환 (quality: 0.9 - 최적화된 품질)
+    const buffer = canvas.toBuffer('image/webp', { quality: 0.9 });
 
     // 응답 전송
     res.setHeader('Content-Type', 'image/webp');
