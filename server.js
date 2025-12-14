@@ -314,7 +314,9 @@ function drawElementOnCanvas(ctx, text, style) {
   const textHeight = h - paddingValues.top - paddingValues.bottom;
 
   // 텍스트 그리기
-  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  // fontFamily 값 검증 및 기본값 설정
+  const finalFontFamily = fontFamily && fontFamily.trim() !== '' ? fontFamily : 'sans-serif';
+  ctx.font = `${fontWeight} ${fontSize}px ${finalFontFamily}`;
   ctx.fillStyle = fill;
   ctx.textBaseline = 'top';
 
@@ -664,9 +666,36 @@ app.get('/*', async (req, res) => {
     textElements.forEach(element => {
       const style = { ...defaultStyle, ...element.style };
 
-      // R2 폰트 사용 여부
+      // R2 폰트 사용 여부 (폰트가 실제로 등록되었을 때만)
       if (element.useR2Font && fontSettings.mode === 'r2') {
-        style.fontFamily = 'CustomR2Font';
+        // R2 폰트가 실제로 등록되었는지 확인
+        if (registeredFonts.has('CustomR2Font')) {
+          // 텍스트 삽입api3-2.js 방식: R2 폰트를 첫 번째로, 원래 fontFamily를 fallback으로
+          const originalFontFamily = style.fontFamily || defaultStyle.fontFamily || 'sans-serif';
+          style.fontFamily = `'CustomR2Font', ${originalFontFamily}`;
+          console.log(`[폰트] R2 폰트 사용 (fallback: ${originalFontFamily}): ${element.query}`);
+        } else {
+          console.warn(`[폰트] R2 폰트가 등록되지 않았습니다. 기본 폰트 사용: ${element.query}`);
+          // R2 폰트가 없으면 원래 fontFamily 또는 defaultStyle의 fontFamily 사용
+          style.fontFamily = style.fontFamily || defaultStyle.fontFamily || 'sans-serif';
+        }
+      } else {
+        // R2 폰트를 사용하지 않는 경우: 원래 fontFamily 사용
+        // 하지만 Canvas는 시스템 폰트만 인식하므로, 등록되지 않은 폰트 이름이면 기본값 사용
+        const systemFonts = ['sans-serif', 'serif', 'monospace', 'Arial', 'Times New Roman', 'Courier New', 'Helvetica', 'Verdana'];
+        const fontFamilyLower = (style.fontFamily || '').toLowerCase();
+        const isSystemFont = systemFonts.some(font => fontFamilyLower.includes(font.toLowerCase()));
+        
+        if (!style.fontFamily || style.fontFamily.trim() === '') {
+          style.fontFamily = defaultStyle.fontFamily || 'sans-serif';
+          console.log(`[폰트] fontFamily가 비어있어 기본값 사용: ${style.fontFamily} (${element.query})`);
+        } else if (!isSystemFont) {
+          // 등록되지 않은 폰트 이름이면 defaultStyle의 fontFamily 사용
+          style.fontFamily = defaultStyle.fontFamily || 'sans-serif';
+          console.warn(`[폰트] 등록되지 않은 폰트 이름 "${style.fontFamily}"를 기본 폰트로 대체: ${defaultStyle.fontFamily || 'sans-serif'} (${element.query})`);
+        } else {
+          console.log(`[폰트] 시스템 폰트 사용: ${style.fontFamily} (${element.query})`);
+        }
       }
 
       // 텍스트 가져오기 및 디코딩
