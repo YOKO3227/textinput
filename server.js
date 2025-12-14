@@ -254,148 +254,226 @@ function drawElementOnCanvas(ctx, text, style) {
 
   ctx.save();
 
-  // 회전 적용 (회전 중심점 계산)
-  if (rotation) {
-    const rotationRad = parseRotation(rotation);
-    if (rotationRad !== 0) {
-      const centerX = x + w / 2;
-      const centerY = y + h / 2;
-      ctx.translate(centerX, centerY);
-      ctx.rotate(rotationRad);
-      ctx.translate(-centerX, -centerY);
+  // 그림자 정보 파싱 (크기 계산을 위해 먼저)
+  let shadow = null;
+  let shadowPadding = { top: 0, right: 0, bottom: 0, left: 0 };
+  if (boxShadow) {
+    shadow = parseBoxShadow(boxShadow);
+    if (shadow && !shadow.inset) {
+      // 그림자 오프셋과 blur를 고려한 패딩 계산
+      const maxOffset = Math.max(Math.abs(shadow.x), Math.abs(shadow.y));
+      const shadowExtent = shadow.blur + maxOffset;
+      shadowPadding = {
+        top: Math.max(0, shadowExtent - shadow.y),
+        right: Math.max(0, shadowExtent - shadow.x),
+        bottom: Math.max(0, shadowExtent + shadow.y),
+        left: Math.max(0, shadowExtent + shadow.x)
+      };
     }
   }
 
   // 배경/테두리/그림자/필터를 위한 별도 Canvas 생성
-  // (배경에만 그림자와 필터를 적용하기 위해)
+  // 그림자 오프셋과 blur를 고려해서 크기 확장
   let bgCanvas = null;
   let bgCtx = null;
   const needsBgCanvas = filter || backgroundColor || borderRadius || borderWidth || boxShadow;
   
   if (needsBgCanvas) {
-    bgCanvas = createCanvas(w, h);
+    // 그림자를 고려한 Canvas 크기 계산
+    const canvasWidth = w + shadowPadding.left + shadowPadding.right;
+    const canvasHeight = h + shadowPadding.top + shadowPadding.bottom;
+    const offsetX = shadowPadding.left;
+    const offsetY = shadowPadding.top;
+    
+    bgCanvas = createCanvas(canvasWidth, canvasHeight);
     bgCtx = bgCanvas.getContext('2d');
     
-    // 필터 적용
-    if (filter && bgCtx.filter !== undefined) {
-      bgCtx.filter = filter;
-    }
+    // 배경 박스 위치를 그림자 패딩만큼 오프셋
+    const boxX = offsetX;
+    const boxY = offsetY;
     
-    // 그림자 적용 (bgCtx에 설정해야 배경에 그림자가 적용됨)
-    if (boxShadow) {
-      const shadow = parseBoxShadow(boxShadow);
-      if (shadow && !shadow.inset) {
-        bgCtx.shadowColor = shadow.color;
-        bgCtx.shadowBlur = shadow.blur;
-        bgCtx.shadowOffsetX = shadow.x;
-        bgCtx.shadowOffsetY = shadow.y;
+    // 1. 블러 효과 처리 (backdrop-filter 효과)
+    // 메인 Canvas에서 배경 박스 영역의 이미지를 가져와서 블러 처리
+    if (filter) {
+      const blurMatch = filter.match(/blur\(([\d.]+)px\)/);
+      if (blurMatch && ctx.canvas) {
+        try {
+          // 회전이 적용되기 전의 원본 Canvas에서 직접 추출
+          // ctx.save()가 호출되었지만 아직 회전이 적용되지 않았으므로
+          // 원본 좌표계에서 추출 가능
+          const mainCanvas = ctx.canvas;
+          const originalCtx = mainCanvas.getContext('2d');
+          
+          // 원본 Canvas에서 이미지 영역 추출
+          const imageData = originalCtx.getImageData(x, y, w, h);
+          const blurCanvas = createCanvas(w, h);
+          const blurCtx = blurCanvas.getContext('2d');
+          blurCtx.putImageData(imageData, 0, 0);
+          
+          // 블러 필터 적용
+          if (blurCtx.filter !== undefined) {
+            // 블러를 적용하려면 다시 그려야 함
+            const tempCanvas = createCanvas(w, h);
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCtx.drawImage(blurCanvas, 0, 0);
+            
+            blurCtx.clearRect(0, 0, w, h);
+            blurCtx.filter = `blur(${blurMatch[1]}px)`;
+            blurCtx.drawImage(tempCanvas, 0, 0);
+            
+            // 블러 처리된 이미지를 bgCanvas에 그리기 (배경 박스 위치에)
+            bgCtx.drawImage(blurCanvas, boxX, boxY);
+          }
+        } catch (e) {
+          // getImageData 실패 시 무시 (회전 등으로 인한 경우)
+          console.warn('[블러] 이미지 추출 실패:', e.message);
+        }
       }
     }
-  }
-
-  // 배경 그리기
-  if (needsBgCanvas || backgroundColor) {
-    const targetCtx = bgCtx || ctx;
     
+    // 2. 그림자 적용 (배경 박스에 그림자 설정)
+    if (shadow && !shadow.inset) {
+      bgCtx.shadowColor = shadow.color;
+      bgCtx.shadowBlur = shadow.blur;
+      bgCtx.shadowOffsetX = shadow.x;
+      bgCtx.shadowOffsetY = shadow.y;
+    }
+    
+    // 3. 배경색 그리기 (그림자 위에)
     if (backgroundColor) {
       const rgba = parseRgba(backgroundColor);
       if (rgba) {
-        targetCtx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
+        bgCtx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
       } else {
-        targetCtx.fillStyle = backgroundColor;
+        bgCtx.fillStyle = backgroundColor;
       }
-    } else {
-      targetCtx.fillStyle = 'transparent';
+      
+      if (borderRadius) {
+        const radius = parseBorderRadius(borderRadius);
+        drawRoundedRect(bgCtx, boxX, boxY, w, h, radius);
+        bgCtx.fill();
+      } else {
+        bgCtx.fillRect(boxX, boxY, w, h);
+      }
     }
-
-    if (borderRadius) {
-      const radius = parseBorderRadius(borderRadius);
-      drawRoundedRect(targetCtx, 0, 0, w, h, radius);
-      targetCtx.fill();
-    } else {
-      targetCtx.fillRect(0, 0, w, h);
+    
+    // 4. 그림자 해제 (테두리는 그림자 없이)
+    if (shadow && !shadow.inset) {
+      bgCtx.shadowColor = 'transparent';
+      bgCtx.shadowBlur = 0;
+      bgCtx.shadowOffsetX = 0;
+      bgCtx.shadowOffsetY = 0;
     }
-
-    // 테두리 그리기
+    
+    // 5. 테두리 그리기
     if (borderWidth) {
       const borderW = parseFloat(String(borderWidth).replace('px', '')) || 0;
       if (borderW > 0) {
-        targetCtx.strokeStyle = borderColor || '#000000';
-        targetCtx.lineWidth = borderW;
+        bgCtx.strokeStyle = borderColor || '#000000';
+        bgCtx.lineWidth = borderW;
         
         // 테두리 스타일 적용
         if (borderStyle === 'dashed') {
           const dashLength = borderW * 3;
           const gapLength = borderW * 2;
-          targetCtx.setLineDash([dashLength, gapLength]);
+          bgCtx.setLineDash([dashLength, gapLength]);
         } else if (borderStyle === 'dotted') {
           const dotSize = borderW;
           const gapLength = borderW * 2;
-          targetCtx.setLineDash([dotSize, gapLength]);
+          bgCtx.setLineDash([dotSize, gapLength]);
         } else if (borderStyle === 'double') {
           // 이중선: 안쪽과 바깥쪽 두 번 그리기
           const doubleGap = borderW / 3;
           const singleLineWidth = borderW / 3;
           
-          targetCtx.setLineDash([]);
-          targetCtx.lineWidth = singleLineWidth;
+          bgCtx.setLineDash([]);
+          bgCtx.lineWidth = singleLineWidth;
           
           // 바깥쪽
           if (borderRadius) {
             const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(targetCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-            targetCtx.stroke();
+            drawRoundedRect(bgCtx, boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
+            bgCtx.stroke();
           } else {
-            targetCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+            bgCtx.strokeRect(boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW);
           }
           
           // 안쪽
           if (borderRadius) {
             const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(targetCtx, borderW / 2 + doubleGap, borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2, Math.max(0, radius - borderW / 2 - doubleGap));
-            targetCtx.stroke();
+            drawRoundedRect(bgCtx, boxX + borderW / 2 + doubleGap, boxY + borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2, Math.max(0, radius - borderW / 2 - doubleGap));
+            bgCtx.stroke();
           } else {
-            targetCtx.strokeRect(borderW / 2 + doubleGap, borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2);
+            bgCtx.strokeRect(boxX + borderW / 2 + doubleGap, boxY + borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2);
           }
           
           // lineWidth 복원
-          targetCtx.lineWidth = borderW;
+          bgCtx.lineWidth = borderW;
         } else {
           // solid (실선) 또는 기본값
-          targetCtx.setLineDash([]);
+          bgCtx.setLineDash([]);
           
           if (borderRadius) {
             const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(targetCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-            targetCtx.stroke();
+            drawRoundedRect(bgCtx, boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
+            bgCtx.stroke();
           } else {
-            targetCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+            bgCtx.strokeRect(boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW);
           }
         }
         
         // LineDash 초기화 (double이 아닌 경우에만)
         if (borderStyle !== 'double') {
-          targetCtx.setLineDash([]);
+          bgCtx.setLineDash([]);
         }
       }
     }
-    
-    // 그림자 해제 (배경 그리기 완료 후)
-    if (boxShadow && bgCtx) {
-      const shadow = parseBoxShadow(boxShadow);
-      if (shadow && !shadow.inset) {
-        bgCtx.shadowColor = 'transparent';
-        bgCtx.shadowBlur = 0;
-        bgCtx.shadowOffsetX = 0;
-        bgCtx.shadowOffsetY = 0;
+
+    // 6. 회전 적용 (배경을 그린 후 회전)
+    if (rotation) {
+      const rotationRad = parseRotation(rotation);
+      if (rotationRad !== 0) {
+        const centerX = x + w / 2;
+        const centerY = y + h / 2;
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rotationRad);
+        ctx.translate(-centerX, -centerY);
       }
     }
-
-    // 필터가 적용된 배경을 메인 Canvas에 복사
-    if (bgCanvas) {
-      // 필터 해제 (텍스트에는 필터 적용 안 함)
-      ctx.filter = 'none';
-      ctx.drawImage(bgCanvas, x, y);
+    
+    // 7. 필터가 적용된 배경을 메인 Canvas에 복사
+    // 그림자 패딩을 고려해서 위치 조정
+    ctx.filter = 'none';
+    ctx.drawImage(bgCanvas, x - shadowPadding.left, y - shadowPadding.top);
+  } else {
+    // bgCanvas가 없는 경우 (배경색만 있거나 아무것도 없는 경우)
+    // 회전 적용
+    if (rotation) {
+      const rotationRad = parseRotation(rotation);
+      if (rotationRad !== 0) {
+        const centerX = x + w / 2;
+        const centerY = y + h / 2;
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rotationRad);
+        ctx.translate(-centerX, -centerY);
+      }
+    }
+    
+    if (backgroundColor) {
+      const rgba = parseRgba(backgroundColor);
+      if (rgba) {
+        ctx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
+      } else {
+        ctx.fillStyle = backgroundColor;
+      }
+      
+      if (borderRadius) {
+        const radius = parseBorderRadius(borderRadius);
+        drawRoundedRect(ctx, x, y, w, h, radius);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y, w, h);
+      }
     }
   }
 
