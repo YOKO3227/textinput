@@ -1,8 +1,10 @@
 require('dotenv').config();
 const express = require('express');
-const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const fetch = require('node-fetch');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const { performance } = require('perf_hooks');
 
 const app = express();
@@ -11,6 +13,14 @@ const PORT = process.env.PORT || 3000;
 // 환경 변수 또는 기본값 설정
 const BASE_URL = process.env.BASE_URL || 'https://o.nfarmer.uk';
 const DEBUG = process.env.DEBUG === 'true' || false;
+
+// 폰트 캐시 디렉토리
+const FONT_CACHE_DIR = path.join(__dirname, '.font_cache');
+if (!fs.existsSync(FONT_CACHE_DIR)) {
+  fs.mkdirSync(FONT_CACHE_DIR, { recursive: true });
+}
+
+const registeredFonts = new Set();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -22,6 +32,80 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
+
+/**
+ * URL에서 폰트 다운로드 및 등록
+ */
+async function registerFontFromUrl(fontUrl, fontFamily) {
+  if (registeredFonts.has(fontFamily)) {
+    if (DEBUG) {
+      console.log(`[폰트] 이미 등록됨: ${fontFamily}`);
+    }
+    return; // 이미 등록됨
+  }
+
+  try {
+    console.log(`[폰트] 등록 시작: ${fontFamily}`);
+    console.log(`[폰트] URL: ${fontUrl}`);
+    
+    const urlHash = crypto.createHash('md5').update(fontUrl).digest('hex');
+    let urlPath;
+    try {
+      urlPath = new URL(fontUrl).pathname;
+    } catch (urlError) {
+      throw new Error(`잘못된 폰트 URL: ${fontUrl} - ${urlError.message}`);
+    }
+    
+    // 확장자 추출
+    const ext = path.extname(urlPath) || '.ttf';
+    const cacheFile = path.join(FONT_CACHE_DIR, `${urlHash}${ext}`);
+
+    let fontBuffer;
+    if (fs.existsSync(cacheFile)) {
+      fontBuffer = fs.readFileSync(cacheFile);
+      console.log(`[폰트] 캐시에서 로드: ${fontFamily} (${fontBuffer.length} bytes)`);
+    } else {
+      console.log(`[폰트] 다운로드 시작: ${fontUrl}`);
+      const response = await fetch(fontUrl, {
+        headers: {
+          'Accept': 'font/*',
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const contentType = response.headers.get('content-type');
+      console.log(`[폰트] Content-Type: ${contentType || 'unknown'}`);
+      
+      fontBuffer = Buffer.from(await response.arrayBuffer());
+      console.log(`[폰트] 다운로드 완료: ${fontBuffer.length} bytes`);
+      
+      if (fontBuffer.length === 0) {
+        throw new Error('폰트 파일이 비어있습니다');
+      }
+      
+      // 캐시 저장
+      fs.writeFileSync(cacheFile, fontBuffer);
+      console.log(`[폰트] 캐시에 저장: ${cacheFile}`);
+    }
+
+    // Canvas에 폰트 등록
+    console.log(`[폰트] Canvas에 등록 중: ${fontFamily}`);
+    GlobalFonts.registerFromPath(cacheFile, fontFamily);
+    registeredFonts.add(fontFamily);
+    console.log(`[폰트] 등록 완료: ${fontFamily}`);
+    
+  } catch (error) {
+    console.error(`[폰트] 등록 실패 (${fontFamily}):`, error.message);
+    if (DEBUG) {
+    console.error(`[폰트] 스택:`, error.stack);
+    }
+    throw error;
+  }
+}
 
 /**
  * 호감도 값 포맷팅
@@ -126,6 +210,21 @@ function createErrorImage(message) {
 }
 
 /**
+ * 폰트 설정에서 폰트 패밀리 가져오기
+ */
+function getFontFamily(config, elementType) {
+  const fontSettings = config.fontSettings || {};
+  const defaultFont = '"Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif';
+  
+  if (elementType === 'name') {
+    return fontSettings.nameFontFamily || defaultFont;
+  } else if (elementType === 'value') {
+    return fontSettings.valueFontFamily || defaultFont;
+  }
+  return defaultFont;
+}
+
+/**
  * 호감도 창 렌더링
  */
 async function renderAffectionWindow(config, value, imageBuffer = null) {
@@ -225,7 +324,8 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     
     if (nameText) {
       ctx.save();
-      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px "Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif`;
+      const nameFontFamily = getFontFamily(config, 'name');
+      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px ${nameFontFamily}`;
       ctx.fillStyle = nameStyles.color || '#000000';
       ctx.textAlign = nameStyles.textAlign || 'left';
       ctx.textBaseline = 'top';
@@ -247,7 +347,8 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     const maxAffection = config.maxAffection || 100;
     
     ctx.save();
-    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px "Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif`;
+    const valueFontFamily = getFontFamily(config, 'value');
+    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px ${valueFontFamily}`;
     ctx.fillStyle = valueStyles.color || '#333';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -347,6 +448,31 @@ app.get('/:bucket/:name.json', async (req, res) => {
     timings.jsonLoad = performance.now() - fetchStart;
     const jsonSize = JSON.stringify(config).length;
     console.log(`[JSON] 로드 완료: ${timings.jsonLoad.toFixed(2)}ms (크기: ${jsonSize} bytes)`);
+    
+    // 폰트 로드 (R2 폰트 모드인 경우)
+    const fontSettings = config.fontSettings || {};
+    if (fontSettings.mode === 'r2' && fontSettings.r2FontFilename) {
+      try {
+        // R2 폰트 URL 생성 (버킷 내 fonts/ 폴더)
+        const fontPath = `fonts/${fontSettings.r2FontFilename}`;
+        const fontUrl = `${BASE_URL}/${bucket}/${fontPath}`;
+        
+        // 폰트 등록 (CustomR2Font라는 이름으로 등록)
+        await registerFontFromUrl(fontUrl, 'CustomR2Font');
+        
+        // 폰트 패밀리 업데이트 (R2 폰트 사용)
+        if (!fontSettings.nameFontFamily || fontSettings.nameFontFamily.includes('CustomR2Font')) {
+          config.fontSettings.nameFontFamily = 'CustomR2Font';
+        }
+        if (!fontSettings.valueFontFamily || fontSettings.valueFontFamily.includes('CustomR2Font')) {
+          config.fontSettings.valueFontFamily = 'CustomR2Font';
+        }
+      } catch (fontError) {
+        console.error(`[폰트] 로드 실패: ${fontError.message}`);
+        console.warn(`[폰트] 기본 폰트를 사용합니다.`);
+        // 폰트 로드 실패해도 계속 진행
+      }
+    }
     
     // 이미지 URL이 있으면 이미지도 미리 가져오기
     let imageBuffer = null;
