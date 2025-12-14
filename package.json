@@ -1,7 +1,7 @@
 {
-  "name": "image-text-overlay-canvas",
+  "name": "affection-window-canvas",
   "version": "1.0.0",
-  "description": "Cloudflare JSON 설정을 사용한 Canvas 이미지 텍스트 오버레이 서비스",
+  "description": "호감도 창 Canvas 생성 서비스 - Cloudflare JSON 설정을 사용한 호감도 창 이미지 생성",
   "main": "server.js",
   "engines": {
     "node": "18.19.0"
@@ -12,10 +12,10 @@
   },
   "keywords": [
     "canvas",
-    "image",
-    "overlay",
+    "affection",
+    "dating-sim",
     "cloudflare",
-    "text"
+    "webp"
   ],
   "author": "",
   "license": "MIT",

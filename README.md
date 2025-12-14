@@ -1,18 +1,19 @@
-# Canvas 이미지 텍스트 오버레이 서비스
+# 호감도 창 Canvas 생성 서비스
 
-Cloudflare Workers의 JSON 설정 형식을 사용하여 이미지에 텍스트를 오버레이하는 Node.js 서비스입니다.
+Cloudflare에 저장된 JSON 설정 파일을 사용하여 호감도 창을 Canvas로 그려 WebP 이미지로 반환하는 Node.js 서비스입니다.
 
 ## 기능
 
-- ✅ Cloudflare Workers와 동일한 URL 패턴 지원
-- ✅ 동적 경로 추출 (버킷명, 이미지 경로 자동 파싱)
-- ✅ JSON 설정 파일 자동 로드
-- ✅ 여러 텍스트 요소 지원
-- ✅ 텍스트 정렬 (좌/중앙/우, 상/중/하)
-- ✅ 줄바꿈 및 자동 줄바꿈
-- ✅ 커스텀 폰트 지원 (R2 또는 HTTP URL)
-- ✅ 텍스트 테두리 (stroke) 지원
-- ✅ 폰트 캐싱 (성능 최적화)
+- ✅ Cloudflare에서 JSON 설정 파일 자동 로드
+- ✅ URL 파라미터로 호감도 값 동적 변경
+- ✅ Canvas를 사용한 호감도 창 렌더링
+  - 배경 컨테이너 (색상, 테두리, 둥근 모서리)
+  - 캐릭터 이미지 (둥근 모서리, 테두리)
+  - 캐릭터 이름 텍스트
+  - 호감도 수치 텍스트 (다양한 포맷 지원)
+  - 호감도 바 (배경 + 채움)
+- ✅ WebP 형식으로 출력
+- ✅ 에러 처리 및 로깅
 
 ## 설치
 
@@ -25,9 +26,14 @@ npm install
 프로젝트 루트에 `.env` 파일을 생성하세요:
 
 ```env
-BASE_URL=https://i.nfarmer.uk
+BASE_URL=https://your-domain.com
 PORT=3000
+DEBUG=false
 ```
+
+- `BASE_URL`: Cloudflare에 올라간 JSON 파일의 기본 URL
+- `PORT`: 서버 포트 (기본값: 3000)
+- `DEBUG`: 디버그 모드 활성화 (true/false)
 
 ## 실행
 
@@ -42,7 +48,7 @@ npm start
 ### URL 패턴
 
 ```
-http://localhost:3000/{버킷명}/{경로}/{이미지파일}?{쿼리파라미터}
+http://localhost:3000/{이름}.json?Value={호감도}
 ```
 
 ### 예시
@@ -50,164 +56,187 @@ http://localhost:3000/{버킷명}/{경로}/{이미지파일}?{쿼리파라미터
 #### 1. 기본 사용
 
 ```
-http://localhost:3000/kbd/A/A/EMO/A/1.webp?text=Hello%20World
+http://localhost:3000/character1.json?Value=75
 ```
 
 이 URL에서:
-- **버킷명**: `kbd`
-- **이미지 경로**: `A/A/EMO/A/1.webp`
-- **JSON 설정 경로**: `A/A/EMO/A.json` (자동 추출)
-- **폰트 경로**: `A/A/EMO/fonts/...` (JSON 설정에서)
-- **텍스트 쿼리**: `text=Hello World`
+- **이름**: `character1`
+- **JSON 파일**: `https://your-domain.com/character1.json`
+- **호감도 값**: `75`
 
-#### 2. 여러 텍스트 요소
+#### 2. 다른 캐릭터
 
 ```
-http://localhost:3000/kbd/A/A/EMO/A/1.webp?title=제목&subtitle=부제목
+http://localhost:3000/heroine.json?Value=50
 ```
 
-#### 3. 다른 버킷/경로
+#### 3. 최대값 확인
 
-```
-http://localhost:3000/mybucket/B/C/D/E/2.jpg?title=제목&subtitle=부제목
-```
-
-- **버킷명**: `mybucket`
-- **이미지**: `B/C/D/E/2.jpg`
-- **JSON**: `B/C/D/E.json`
-- **텍스트**: `title`, `subtitle`
-
-#### 4. 커스텀 BASE_URL
-
-```
-http://localhost:3000/kbd/A/A/EMO/A/1.webp?text=테스트&baseUrl=https://custom-domain.com
-```
+호감도 값은 JSON의 `maxAffection` 값과 비교되어 비율로 계산됩니다.
 
 ## JSON 설정 파일 형식
 
-이미지와 같은 폴더 구조에 JSON 설정 파일이 있어야 합니다.
+Cloudflare에 업로드할 JSON 파일 형식입니다.
 
-### 예시: `A/A/EMO/A.json`
+### 예시: `character1.json`
 
 ```json
 {
-  "imageSize": {
-    "width": 800,
-    "height": 600
-  },
-  "defaultStyle": {
-    "fontFamily": "Arial",
-    "fontSize": 24,
-    "fill": "#FFFFFF",
-    "textAlign": "left",
-    "verticalAlign": "top",
-    "strokeWidth": 0,
-    "stroke": "#000000",
-    "lineHeight": 1.2,
-    "fontWeight": "normal"
-  },
-  "elements": [
-    {
-      "query": "text",
-      "x": 50,
-      "y": 100,
-      "width": 700,
-      "height": 100,
-      "style": {
-        "fontSize": 48,
-        "fill": "#FF0000",
-        "textAlign": "center",
-        "verticalAlign": "middle"
-      },
-      "useR2Font": false
+  "characterName": "캐릭터 이름",
+  "imageUrl": "https://example.com/character1.png",
+  "maxAffection": 100,
+  "container": {
+    "styles": {
+      "backgroundColor": "#f0f0f0",
+      "borderWidth": 2,
+      "borderColor": "#333",
+      "borderRadius": 10,
+      "padding": 15
     },
-    {
-      "query": "subtitle",
-      "x": 50,
-      "y": 250,
-      "width": 700,
-      "height": 50,
-      "style": {
-        "fontSize": 24,
-        "fill": "#000000",
-        "textAlign": "left"
-      }
+    "layout": {
+      "width": 400,
+      "height": 200
     }
-  ],
-  "fonts": [],
-  "fontSettings": {
-    "mode": "r2",
-    "r2FontFilename": "NanumGothic.ttf"
+  },
+  "characterName": {
+    "styles": {
+      "fontSize": 20,
+      "color": "#000000",
+      "fontWeight": "bold",
+      "textAlign": "left"
+    },
+    "layout": {
+      "x": 10,
+      "y": 10
+    }
+  },
+  "characterImage": {
+    "styles": {
+      "borderRadius": 50,
+      "borderWidth": 2,
+      "borderColor": "#cccccc"
+    },
+    "layout": {
+      "width": 100,
+      "height": 100,
+      "x": 10,
+      "y": 50
+    }
+  },
+  "affectionValue": {
+    "styles": {
+      "fontSize": 18,
+      "color": "#333",
+      "fontWeight": "normal"
+    },
+    "layout": {
+      "x": 200,
+      "y": 100
+    },
+    "format": "number"
+  },
+  "affectionBar": {
+    "styles": {
+      "backgroundColor": "#e0e0e0",
+      "fillColor": "#4CAF50",
+      "borderRadius": 10
+    },
+    "layout": {
+      "width": 180,
+      "height": 20,
+      "x": 200,
+      "y": 120
+    }
   }
 }
 ```
 
 ### 설정 옵션
 
-#### imageSize
-- `width`: 캔버스 너비 (픽셀)
-- `height`: 캔버스 높이 (픽셀)
-- 생략 시 원본 이미지 크기 사용
+#### 최상위 필드
 
-#### defaultStyle
-모든 요소에 적용될 기본 스타일
+- `characterName` (string): 캐릭터 이름
+- `imageUrl` (string): 캐릭터 이미지 URL
+- `maxAffection` (number): 최대 호감도 값
 
-- `fontFamily`: 폰트 패밀리 (기본값: "sans-serif")
-- `fontSize`: 폰트 크기 (기본값: 24)
-- `fill`: 텍스트 색상 (기본값: "#000000")
-- `textAlign`: 수평 정렬 - "left", "center", "right" (기본값: "left")
-- `verticalAlign`: 수직 정렬 - "top", "middle"/"center", "bottom" (기본값: "top")
-- `strokeWidth`: 테두리 두께 (기본값: 0)
-- `stroke`: 테두리 색상 (기본값: "#ffffff")
-- `lineHeight`: 줄 간격 배율 (기본값: 1.2)
-- `fontWeight`: 폰트 굵기 - "normal", "bold" 등 (기본값: "normal")
+#### container
 
-#### elements
-텍스트 요소 배열
+전체 창 스타일 및 레이아웃
 
-- `query`: URL 쿼리 파라미터 이름 (필수)
-- `x`: X 위치 (픽셀)
-- `y`: Y 위치 (픽셀)
-- `width`: 텍스트 영역 너비 (픽셀)
-- `height`: 텍스트 영역 높이 (픽셀)
-- `style`: 이 요소에만 적용될 스타일 (defaultStyle과 병합)
-- `useR2Font`: R2 폰트 사용 여부 (boolean)
+- `styles.backgroundColor` (string): 배경색 (기본값: "#f0f0f0")
+- `styles.borderWidth` (number): 테두리 두께 (기본값: 2)
+- `styles.borderColor` (string): 테두리 색상 (기본값: "#333")
+- `styles.borderRadius` (number): 둥근 모서리 (기본값: 10)
+- `styles.padding` (number): 패딩 (기본값: 15)
+- `layout.width` (number): 창 너비 (기본값: 400)
+- `layout.height` (number): 창 높이 (기본값: 200)
 
-#### fontSettings
-폰트 설정
+#### characterName
 
-- `mode`: "r2" 또는 기타
-- `r2FontFilename`: R2에 있는 폰트 파일명
-  - 경로: `{configDir}/fonts/{r2FontFilename}`
-  - 예: `A/A/EMO/fonts/NanumGothic.ttf`
+캐릭터 이름 텍스트 스타일
 
-## 폴더 구조 예시
+- `styles.fontSize` (number): 폰트 크기 (기본값: 20)
+- `styles.color` (string): 텍스트 색상 (기본값: "#000000")
+- `styles.fontWeight` (string): 폰트 굵기 (기본값: "bold")
+- `styles.textAlign` (string): 정렬 - "left", "center", "right" (기본값: "left")
+- `layout.x` (number): X 위치 (기본값: 10)
+- `layout.y` (number): Y 위치 (기본값: 10)
 
-```
-버킷 (kbd)/
-├── A/
-│   ├── A/
-│   │   └── EMO/
-│   │       ├── A.json          (설정 파일)
-│   │       ├── fonts/
-│   │       │   └── NanumGothic.ttf
-│   │       └── A/
-│   │           └── 1.webp      (이미지 파일)
-```
+#### characterImage
+
+캐릭터 이미지 스타일
+
+- `styles.borderRadius` (number): 둥근 모서리 (기본값: 50)
+- `styles.borderWidth` (number): 테두리 두께 (기본값: 2)
+- `styles.borderColor` (string): 테두리 색상 (기본값: "#cccccc")
+- `layout.width` (number): 이미지 너비 (기본값: 100)
+- `layout.height` (number): 이미지 높이 (기본값: 100)
+- `layout.x` (number): X 위치 (기본값: 10)
+- `layout.y` (number): Y 위치 (기본값: 50)
+
+#### affectionValue
+
+호감도 수치 텍스트 스타일
+
+- `styles.fontSize` (number): 폰트 크기 (기본값: 18)
+- `styles.color` (string): 텍스트 색상 (기본값: "#333")
+- `styles.fontWeight` (string): 폰트 굵기 (기본값: "normal")
+- `layout.x` (number): X 위치 (기본값: 200)
+- `layout.y` (number): Y 위치 (기본값: 100)
+- `format` (string): 표시 형식
+  - `"number"`: 숫자만 (예: "75")
+  - `"fraction"`: 분수 형식 (예: "75/100")
+  - `"percent"`: 퍼센트 형식 (예: "75%")
+
+#### affectionBar
+
+호감도 바 스타일
+
+- `styles.backgroundColor` (string): 배경 바 색상 (기본값: "#e0e0e0")
+- `styles.fillColor` (string): 채움 바 색상 (기본값: "#4CAF50")
+- `styles.borderRadius` (number): 둥근 모서리 (기본값: 10)
+- `layout.width` (number): 바 너비 (기본값: 180)
+- `layout.height` (number): 바 높이 (기본값: 20)
+- `layout.x` (number): X 위치 (기본값: 200)
+- `layout.y` (number): Y 위치 (기본값: 120)
 
 ## API 엔드포인트
 
-### GET `/*` (와일드카드)
+### GET `/{name}.json`
 
-이미지에 텍스트 오버레이를 추가하여 PNG로 반환합니다.
+호감도 창을 WebP 이미지로 반환합니다.
 
-**URL 패턴**: `/{버킷명}/{경로}/{이미지파일}?{쿼리}`
+**URL 패턴**: `/{이름}.json?Value={호감도}`
 
 **쿼리 파라미터**:
-- `baseUrl` (선택): 기본 URL 오버라이드
-- 기타: JSON 설정의 `elements[].query`에 해당하는 텍스트 값들
+- `Value` (필수): 현재 호감도 값 (0 이상의 정수)
 
-**응답**: PNG 이미지 (Content-Type: image/png)
+**응답**: WebP 이미지 (Content-Type: image/webp)
+
+**예시**:
+```
+GET /character1.json?Value=75
+```
 
 ### GET `/health`
 
@@ -218,29 +247,50 @@ http://localhost:3000/kbd/A/A/EMO/A/1.webp?text=테스트&baseUrl=https://custom
 {
   "status": "ok",
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "baseUrl": "https://i.nfarmer.uk",
+  "baseUrl": "https://your-domain.com",
   "port": 3000
 }
 ```
 
+### GET `/`
+
+서비스 정보 및 사용법
+
+**응답**: JSON
+```json
+{
+  "service": "Affection Window Canvas Generator",
+  "usage": "GET /{name}.json?Value={affection_value}",
+  "example": "GET /character1.json?Value=75",
+  "baseUrl": "https://your-domain.com"
+}
+```
+
+## 배포
+
+### Cloudflare에 JSON 파일 업로드
+
+1. JSON 설정 파일을 생성합니다 (위의 형식 참고)
+2. Cloudflare R2 또는 Pages에 업로드합니다
+3. 파일명은 `{이름}.json` 형식으로 저장합니다
+
+### 서버 배포
+
+Railway, Heroku, 또는 다른 Node.js 호스팅 서비스에 배포할 수 있습니다.
+
+**Railway 배포 예시**:
+1. GitHub에 프로젝트 푸시
+2. Railway에서 프로젝트 연결
+3. 환경 변수 설정:
+   - `BASE_URL`: Cloudflare 도메인
+   - `PORT`: Railway가 자동 설정
+   - `DEBUG`: `false` (프로덕션)
+
 ## 주의사항
 
-1. **Canvas 패키지 설치**: Windows에서 `canvas` 패키지 설치 시 네이티브 빌드가 필요할 수 있습니다.
-   - Python 3.x
-   - Visual Studio Build Tools
-   
-   또는 `@napi-rs/canvas` 사용 (더 쉬운 설치):
-   ```bash
-   npm install @napi-rs/canvas
-   ```
-   그리고 `server.js`에서 import 변경:
-   ```javascript
-   const { createCanvas, loadImage, registerFont } = require('@napi-rs/canvas');
-   ```
-
-2. **폰트 캐싱**: 다운로드한 폰트는 `.font_cache` 디렉토리에 캐시됩니다.
-
-3. **에러 처리**: 오류 발생 시 에러 이미지(PNG)를 반환합니다.
+1. **이미지 URL**: `imageUrl`은 CORS가 활성화된 공개 URL이어야 합니다.
+2. **JSON 파일**: Cloudflare에 업로드된 JSON 파일은 공개 접근 가능해야 합니다.
+3. **호감도 값**: `Value` 파라미터는 0 이상의 정수여야 합니다. 최대값은 JSON의 `maxAffection`으로 제한됩니다.
 
 ## 개발
 
@@ -249,9 +299,8 @@ http://localhost:3000/kbd/A/A/EMO/A/1.webp?text=테스트&baseUrl=https://custom
 npm run dev
 ```
 
+디버그 모드를 활성화하려면 `.env` 파일에 `DEBUG=true`를 설정하세요.
+
 ## 라이선스
 
 MIT
-
-## githud 푸시 할 때 
-Initial commit for Railway deployment

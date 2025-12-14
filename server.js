@@ -1,10 +1,9 @@
 require('dotenv').config();
 const express = require('express');
-const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const fetch = require('node-fetch');
-const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const { performance } = require('perf_hooks');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,136 +23,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// 폰트 캐시 디렉토리
-const FONT_CACHE_DIR = path.join(__dirname, '.font_cache');
-if (!fs.existsSync(FONT_CACHE_DIR)) {
-  fs.mkdirSync(FONT_CACHE_DIR, { recursive: true });
-}
-
-const registeredFonts = new Set();
-
 /**
- * URL에서 폰트 다운로드 및 등록
+ * 호감도 값 포맷팅
  */
-/**
- * URL에서 폰트 다운로드 및 등록 (Cloudflare Workers 방식 참조)
- */
-async function registerFontFromUrl(fontUrl, fontFamily) {
-  if (registeredFonts.has(fontFamily)) {
-    console.log(`폰트 이미 등록됨: ${fontFamily}`);
-    return; // 이미 등록됨
+function formatAffectionValue(value, max, format) {
+  switch (format) {
+    case 'fraction':
+      return `${value}/${max}`;
+    case 'percent':
+      return `${Math.round((value / max) * 100)}%`;
+    default:
+      return value.toString();
   }
-
-  try {
-    console.log(`[폰트] 등록 시작: ${fontFamily}`);
-    console.log(`[폰트] URL: ${fontUrl}`);
-    
-    const urlHash = crypto.createHash('md5').update(fontUrl).digest('hex');
-    let urlPath;
-    try {
-      urlPath = new URL(fontUrl).pathname;
-    } catch (urlError) {
-      throw new Error(`잘못된 폰트 URL: ${fontUrl} - ${urlError.message}`);
-    }
-    
-    // 확장자 추출 (Cloudflare Workers 방식과 유사)
-    const ext = path.extname(urlPath) || '.ttf';
-    const cacheFile = path.join(FONT_CACHE_DIR, `${urlHash}${ext}`);
-
-    let fontBuffer;
-    if (fs.existsSync(cacheFile)) {
-      fontBuffer = fs.readFileSync(cacheFile);
-      console.log(`[폰트] 캐시에서 로드: ${fontFamily} (${fontBuffer.length} bytes)`);
-    } else {
-      console.log(`[폰트] 다운로드 시작: ${fontUrl}`);
-      const response = await fetch(fontUrl);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const contentType = response.headers.get('content-type');
-      console.log(`[폰트] Content-Type: ${contentType || 'unknown'}`);
-      
-      fontBuffer = Buffer.from(await response.arrayBuffer());
-      console.log(`[폰트] 다운로드 완료: ${fontBuffer.length} bytes`);
-      
-      if (fontBuffer.length === 0) {
-        throw new Error('폰트 파일이 비어있습니다');
-      }
-      
-      // 캐시 저장
-      fs.writeFileSync(cacheFile, fontBuffer);
-      console.log(`[폰트] 캐시에 저장: ${cacheFile}`);
-    }
-
-    // Canvas에 폰트 등록 (@napi-rs/canvas는 GlobalFonts 사용)
-    console.log(`[폰트] Canvas에 등록 중: ${fontFamily}`);
-    // @napi-rs/canvas의 GlobalFonts.registerFromPath는 파일 경로와 폰트 패밀리명을 받습니다
-    GlobalFonts.registerFromPath(cacheFile, fontFamily);
-    registeredFonts.add(fontFamily);
-    console.log(`[폰트] 등록 완료: ${fontFamily}`);
-    
-  } catch (error) {
-    console.error(`[폰트] 등록 실패 (${fontFamily}):`, error.message);
-    console.error(`[폰트] 스택:`, error.stack);
-    throw error; // 에러를 다시 던져서 상위에서 처리할 수 있도록
-  }
-}
-
-/**
- * 텍스트 디코딩 (Cloudflare Workers 로직과 동일)
- */
-function decodeText(text) {
-  if (!text) return '';
-  return decodeURIComponent(String(text))
-    .replace(/_/g, ' ')
-    .replace(/%0A/gi, '\n');
-}
-
-/**
- * RGBA 문자열 파싱 (예: "rgba(255, 0, 0, 0.7)" -> {r, g, b, a})
- */
-function parseRgba(rgbaString) {
-  if (!rgbaString) return null;
-  const match = rgbaString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (match) {
-    return {
-      r: parseInt(match[1]),
-      g: parseInt(match[2]),
-      b: parseInt(match[3]),
-      a: match[4] ? parseFloat(match[4]) : 1
-    };
-  }
-  return null;
-}
-
-/**
- * Padding 문자열 파싱 (예: "12px 16px" -> {top: 12, right: 16, bottom: 12, left: 16})
- */
-function parsePadding(paddingString) {
-  if (!paddingString) return { top: 0, right: 0, bottom: 0, left: 0 };
-  const values = paddingString.match(/(\d+)px/g);
-  if (!values || values.length === 0) return { top: 0, right: 0, bottom: 0, left: 0 };
-  
-  const nums = values.map(v => parseInt(v));
-  if (nums.length === 1) {
-    return { top: nums[0], right: nums[0], bottom: nums[0], left: nums[0] };
-  } else if (nums.length === 2) {
-    return { top: nums[0], right: nums[1], bottom: nums[0], left: nums[1] };
-  } else if (nums.length === 4) {
-    return { top: nums[0], right: nums[1], bottom: nums[2], left: nums[3] };
-  }
-  return { top: 0, right: 0, bottom: 0, left: 0 };
-}
-
-/**
- * BorderRadius 파싱 (예: "8px" -> 8)
- */
-function parseBorderRadius(borderRadiusString) {
-  if (!borderRadiusString) return 0;
-  const match = borderRadiusString.match(/(\d+)px/);
-  return match ? parseInt(match[1]) : 0;
 }
 
 /**
@@ -161,11 +42,6 @@ function parseBorderRadius(borderRadiusString) {
  */
 function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
-  if (radius <= 0) {
-    ctx.rect(x, y, width, height);
-    return;
-  }
-  
   ctx.moveTo(x + radius, y);
   ctx.lineTo(x + width - radius, y);
   ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
@@ -179,285 +55,14 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
 }
 
 /**
- * Canvas에 요소 그리기 (배경, 필터, 테두리, 텍스트 지원)
+ * 둥근 이미지 그리기
  */
-function drawElementOnCanvas(ctx, text, style) {
-  const {
-    x = 0,
-    y = 0,
-    width: w = ctx.canvas.width,
-    height: h = ctx.canvas.height,
-    verticalAlign = 'top',
-    fontSize = 24,
-    fontFamily = 'sans-serif',
-    fill = '#000000',
-    stroke = '#ffffff',
-    strokeWidth = 0,
-    textAlign = 'left',
-    lineHeight = 1.2,
-    fontWeight = 'normal',
-    backgroundColor,
-    padding,
-    borderRadius,
-    borderWidth,
-    borderColor = '#000000',
-    filter,
-    whiteSpace = 'pre-wrap'
-  } = style;
-
+function drawRoundedImage(ctx, image, x, y, width, height, radius) {
   ctx.save();
-
-  // 배경/테두리/필터를 위한 별도 Canvas 생성
-  let bgCanvas = null;
-  let bgCtx = null;
-  const needsBgCanvas = filter || backgroundColor || borderRadius || borderWidth;
-  
-  if (needsBgCanvas) {
-    bgCanvas = createCanvas(w, h);
-    bgCtx = bgCanvas.getContext('2d');
-    
-    // 1. 배경색 먼저 그리기 (필터보다 먼저)
-    if (backgroundColor) {
-      const rgba = parseRgba(backgroundColor);
-      if (rgba) {
-        bgCtx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
-      } else {
-        bgCtx.fillStyle = backgroundColor;
-      }
-      
-      if (borderRadius) {
-        const radius = parseBorderRadius(borderRadius);
-        drawRoundedRect(bgCtx, 0, 0, w, h, radius);
-        bgCtx.fill();
-      } else {
-        bgCtx.fillRect(0, 0, w, h);
-      }
-    }
-    
-    // 2. 필터 효과 처리 (배경색 위에 필터 적용된 이미지 합성)
-    if (filter && ctx.canvas) {
-      try {
-        const mainCanvas = ctx.canvas;
-        const originalCtx = mainCanvas.getContext('2d');
-        
-        // 원본 Canvas에서 이미지 영역 추출
-        const imageData = originalCtx.getImageData(x, y, w, h);
-        const filterCanvas = createCanvas(w, h);
-        const filterCtx = filterCanvas.getContext('2d');
-        filterCtx.putImageData(imageData, 0, 0);
-        
-        // 필터 적용
-        if (filterCtx.filter !== undefined) {
-          const tempCanvas = createCanvas(w, h);
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCtx.drawImage(filterCanvas, 0, 0);
-          
-          filterCtx.clearRect(0, 0, w, h);
-          filterCtx.filter = filter;
-          filterCtx.drawImage(tempCanvas, 0, 0);
-          
-          // 배경색 위에 필터 적용된 이미지 합성
-          bgCtx.globalCompositeOperation = 'source-over';
-          bgCtx.drawImage(filterCanvas, 0, 0);
-        }
-      } catch (e) {
-        console.warn('[필터] 이미지 추출 실패:', e.message);
-      }
-    }
-    
-    // 3. 테두리 그리기 (항상 solid)
-    if (borderWidth) {
-      const borderW = parseFloat(String(borderWidth).replace('px', '')) || 0;
-      if (borderW > 0) {
-        bgCtx.strokeStyle = borderColor || '#000000';
-        bgCtx.lineWidth = borderW;
-        bgCtx.setLineDash([]);
-        
-        if (borderRadius) {
-          const radius = parseBorderRadius(borderRadius);
-          drawRoundedRect(bgCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-          bgCtx.stroke();
-        } else {
-          bgCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
-        }
-      }
-    }
-    
-    // 배경을 메인 Canvas에 복사
-    ctx.filter = 'none';
-    ctx.drawImage(bgCanvas, x, y);
-  } else {
-    // bgCanvas가 없는 경우 (배경색만 있거나 아무것도 없는 경우)
-    if (backgroundColor) {
-      const rgba = parseRgba(backgroundColor);
-      if (rgba) {
-        ctx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
-      } else {
-        ctx.fillStyle = backgroundColor;
-      }
-      
-      if (borderRadius) {
-        const radius = parseBorderRadius(borderRadius);
-        drawRoundedRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-      } else {
-        ctx.fillRect(x, y, w, h);
-      }
-    }
-  }
-
-  // 패딩 계산
-  const paddingValues = parsePadding(padding);
-  const textX = x + paddingValues.left;
-  const textY = y + paddingValues.top;
-  const textWidth = w - paddingValues.left - paddingValues.right;
-  const textHeight = h - paddingValues.top - paddingValues.bottom;
-
-  // 텍스트 그리기
-  // fontFamily 값 검증 및 기본값 설정
-  const finalFontFamily = fontFamily && fontFamily.trim() !== '' ? fontFamily : 'sans-serif';
-  ctx.font = `${fontWeight} ${fontSize}px ${finalFontFamily}`;
-  ctx.fillStyle = fill;
-  ctx.textBaseline = 'top';
-
-  // 줄바꿈 처리
-  let lines;
-  if (whiteSpace === 'pre' || whiteSpace === 'pre-wrap') {
-    lines = text.split('\n');
-  } else if (whiteSpace === 'nowrap') {
-    lines = [text];
-  } else {
-    lines = text.split('\n');
-  }
-  
-  const lineHeightPx = fontSize * lineHeight;
-
-  // 자동 줄바꿈 처리
-  const measuredLines = [];
-  lines.forEach(line => {
-    if (whiteSpace === 'nowrap' || whiteSpace === 'pre') {
-      measuredLines.push(line);
-    } else {
-      const metrics = ctx.measureText(line);
-      if (metrics.width > textWidth && textWidth > 0) {
-        // 자동 줄바꿈
-        const words = line.split(' ');
-        let currentLine = '';
-        words.forEach(word => {
-          const testLine = currentLine + (currentLine ? ' ' : '') + word;
-          const testMetrics = ctx.measureText(testLine);
-          if (testMetrics.width > textWidth && currentLine) {
-            measuredLines.push(currentLine);
-            currentLine = word;
-          } else {
-            currentLine = testLine;
-          }
-        });
-        if (currentLine) measuredLines.push(currentLine);
-      } else {
-        measuredLines.push(line);
-      }
-    }
-  });
-
-  const totalHeight = measuredLines.length * lineHeightPx;
-
-  // 수직 정렬
-  let startY = textY;
-  if (verticalAlign === 'middle' || verticalAlign === 'center') {
-    startY = textY + Math.max(0, (textHeight - totalHeight) / 2);
-  } else if (verticalAlign === 'bottom') {
-    startY = textY + Math.max(0, textHeight - totalHeight);
-  }
-
-  // 수평 정렬 계산 (패딩을 고려한 영역 기준)
-  // ctx.textAlign을 먼저 설정해야 fillText의 x 좌표 의미가 올바르게 적용됨
-  ctx.textAlign = textAlign;
-  let textXPos;
-  if (textAlign === 'center') {
-    // 패딩을 고려한 영역의 중심점
-    textXPos = textX + textWidth / 2;
-  } else if (textAlign === 'right') {
-    // 패딩을 고려한 영역의 오른쪽 끝
-    textXPos = textX + textWidth;
-  } else {
-    // 'left' 또는 기본값: 패딩을 고려한 영역의 왼쪽 시작
-    textXPos = textX;
-  }
-
-  // 각 줄 그리기
-  measuredLines.forEach((line, index) => {
-    const lineY = startY + (index * lineHeightPx);
-
-    // Stroke (테두리)
-    if (strokeWidth > 0 && stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = strokeWidth;
-      ctx.strokeText(line, textXPos, lineY);
-    }
-
-    // Fill (텍스트)
-    ctx.fillText(line, textXPos, lineY);
-  });
-
+  drawRoundedRect(ctx, x, y, width, height, radius);
+  ctx.clip();
+  ctx.drawImage(image, x, y, width, height);
   ctx.restore();
-}
-
-/**
- * URL 경로에서 경로 정보 추출 (Cloudflare Workers 로직과 동일)
- */
-function extractPathInfo(urlPathname) {
-  // 앞의 슬래시 제거
-  let path = urlPathname;
-  if (path.startsWith('/')) {
-    path = path.substring(1);
-  }
-  
-  const pathParts = path.split('/').filter(Boolean);
-
-  if (pathParts.length < 3) {
-    throw new Error(`경로 형식이 올바르지 않습니다. 최소 3개의 경로 요소가 필요합니다. (버킷명/경로/이미지파일) 현재 경로: "${urlPathname}", 추출된 요소: ${pathParts.length}개 [${pathParts.join(', ')}]`);
-  }
-
-  const bucketName = pathParts[0]; // 예: 'kbd'
-  const imagePath = pathParts.slice(1).join('/'); // 예: 'A/A/EMO/A/1.webp'
-
-  // 이미지 파일의 디렉토리 경로 추출
-  const imagePathParts = imagePath.split('/');
-  
-  if (imagePathParts.length < 2) {
-    throw new Error(`이미지 경로가 올바르지 않습니다. 최소 폴더명/파일명 구조가 필요합니다. 현재 경로: "${imagePath}"`);
-  }
-
-  // A/A/EMO/A/1.webp에서:
-  // - 마지막 2개 제거: 파일명(1.webp)과 바로 위 폴더(A)
-  // - configDir: A/A/EMO
-  // - folderName: A
-  const configDir = imagePathParts.slice(0, -2).join('/');
-  const folderName = imagePathParts[imagePathParts.length - 2];
-
-  // JSON 파일 경로: A/A/EMO/A.json
-  const configKey = `${configDir}/${folderName}.json`;
-
-  return {
-    bucketName,
-    imagePath,
-    configDir,
-    folderName,
-    configKey
-  };
-}
-
-/**
- * 리소스 URL 생성
- */
-function buildResourceUrl(baseUrl, bucketName, resourcePath) {
-  // baseUrl이 전체 URL인지 확인
-  if (baseUrl.startsWith('http://') || baseUrl.startsWith('https://')) {
-    return `${baseUrl}/${bucketName}/${resourcePath}`;
-  } else {
-    return `https://${baseUrl}/${bucketName}/${resourcePath}`;
-  }
 }
 
 /**
@@ -507,7 +112,6 @@ function createErrorImage(message) {
       return canvas.toBuffer('image/png');
     }
   } catch (error) {
-    // 에러 이미지 생성 자체가 실패한 경우 기본 PNG 반환
     console.error('[에러 이미지] 생성 실패:', error.message);
     const canvas = createCanvas(800, 600);
     const ctx = canvas.getContext('2d');
@@ -522,211 +126,268 @@ function createErrorImage(message) {
 }
 
 /**
- * 메인 오버레이 핸들러 - 동적 경로 추출
+ * 호감도 창 렌더링
  */
-app.get('/*', async (req, res) => {
+async function renderAffectionWindow(config, value, imageBuffer = null) {
+  const startTime = performance.now();
+  const timings = {};
+  
   try {
-    // originalUrl에서 쿼리 파라미터를 제외한 경로만 추출
-    let pathname = req.originalUrl || req.url;
-    
-    // 쿼리 파라미터 제거
-    if (pathname.includes('?')) {
-      pathname = pathname.split('?')[0];
-    }
-    
-    // 특수 경로 필터링 (경로 검증 전에 처리)
-    if (pathname === '/health') {
-      return res.json({ 
-        status: 'ok', 
-        timestamp: new Date().toISOString(),
-        baseUrl: BASE_URL,
-        port: PORT
-      });
-    }
-    
-    // favicon.ico 및 기타 브라우저 자동 요청 무시
-    if (pathname === '/favicon.ico' || pathname.startsWith('/favicon')) {
-      return res.status(404).end();
-    }
-    
-    // robots.txt 등 기타 자동 요청도 무시
-    if (pathname === '/robots.txt') {
-      return res.status(404).end();
-    }
-    
-    // .well-known 경로 (Chrome DevTools 등) 무시
-    if (pathname.startsWith('/.well-known')) {
-      return res.status(404).end();
-    }
-    
-    console.log(`[디버그] originalUrl: ${req.originalUrl}`);
-    console.log(`[디버그] 추출된 pathname: ${pathname}`);
-
-    // 경로 정보 추출
-    const { bucketName, imagePath, configDir, configKey } = extractPathInfo(pathname);
-
-    // 쿼리 파라미터에서 baseUrl 확인 (선택사항, 없으면 환경변수 또는 기본값 사용)
-    const customBaseUrl = req.query.baseUrl || process.env.BASE_URL || BASE_URL;
-
-    // 성능 측정 시작
-    const startTime = performance.now();
-
-    // 이미지 URL과 설정 JSON URL 생성
-    const imageUrl = buildResourceUrl(customBaseUrl, bucketName, imagePath);
-    const configUrl = buildResourceUrl(customBaseUrl, bucketName, configKey);
-
-    // 설정과 이미지 가져오기 (병렬)
-    const fetchStart = performance.now();
-    const [configRes, imageRes] = await Promise.all([
-      fetch(configUrl).then(r => {
-        if (!r.ok) throw new Error(`설정 파일을 가져올 수 없습니다: ${configUrl} (${r.status})`);
-        return r;
-      }),
-      fetch(imageUrl).then(r => {
-        if (!r.ok) throw new Error(`이미지를 가져올 수 없습니다: ${imageUrl} (${r.status})`);
-        return r;
-      })
-    ]);
-
-    const [config, imageBuffer] = await Promise.all([
-      configRes.json(),
-      imageRes.arrayBuffer()
-    ]);
-    const fetchTime = performance.now() - fetchStart;
-    if (DEBUG) {
-      console.log(`[성능] HTTP 요청: ${fetchTime.toFixed(2)}ms`);
-    }
-
-    // config 파싱
-    const {
-      imageSize = {},
-      elements = [],
-      defaultStyle = {},
-      fonts = [],
-      fontSettings = {}
-    } = config;
-
-    const width = imageSize.width || 800;
-    const height = imageSize.height || 600;
-
-    // 폰트 URL 미리 계산 (폰트가 필요한 경우)
-    const fontPath = fontSettings.mode === 'r2' && fontSettings.r2FontFilename
-      ? `${configDir}/fonts/${fontSettings.r2FontFilename}`
-      : null;
-    const fontUrl = fontPath ? buildResourceUrl(customBaseUrl, bucketName, fontPath) : null;
-
-    // 이미지 로드와 폰트 로드를 병렬 처리
-    const loadStart = performance.now();
-    const [image, fontLoaded] = await Promise.all([
-      loadImage(Buffer.from(imageBuffer)),
-      fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').catch(err => {
-        console.error(`[폰트] 로드 실패: ${err.message}`);
-        console.error(`[폰트] URL: ${fontUrl}`);
-        console.warn(`[폰트] 기본 폰트를 사용합니다.`);
-        return null; // 폰트 로드 실패해도 계속 진행
-      }) : Promise.resolve(null)
-    ]);
-    const loadTime = performance.now() - loadStart;
-    if (DEBUG) {
-      console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
-    }
-
-    // Canvas 생성
+    // Canvas 크기 설정
     const canvasStart = performance.now();
-    const canvas = createCanvas(width, height);
+    const containerWidth = config.container?.layout?.width || 400;
+    const containerHeight = config.container?.layout?.height || 200;
+    const padding = config.container?.styles?.padding || 15;
+    
+    const canvas = createCanvas(containerWidth, containerHeight);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(image, 0, 0, width, height);
-
-    // 외부 폰트 처리 (Google Fonts 등)
-    // 실제로는 폰트를 다운로드해야 하지만, 여기서는 시스템 폰트 사용
-
-    // 쿼리 파라미터 추출
-    const queryParams = {};
-    if (req.query) {
-      Object.keys(req.query).forEach(key => {
-        // baseUrl은 제외
-        if (key !== 'baseUrl') {
-          queryParams[key] = req.query[key];
-        }
-      });
+    timings.canvasCreate = performance.now() - canvasStart;
+    
+    // 배경 그리기
+    const bgStart = performance.now();
+    const bgColor = config.container?.styles?.backgroundColor || '#f0f0f0';
+    const borderWidth = config.container?.styles?.borderWidth || 2;
+    const borderColor = config.container?.styles?.borderColor || '#333';
+    const borderRadius = config.container?.styles?.borderRadius || 10;
+    
+    ctx.fillStyle = bgColor;
+    drawRoundedRect(ctx, 0, 0, containerWidth, containerHeight, borderRadius);
+    ctx.fill();
+    
+    // 테두리 그리기
+    if (borderWidth > 0) {
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = borderWidth;
+      drawRoundedRect(ctx, borderWidth / 2, borderWidth / 2, 
+                     containerWidth - borderWidth, containerHeight - borderWidth, 
+                     borderRadius - borderWidth / 2);
+      ctx.stroke();
     }
-
-    // 텍스트 요소 필터링
-    const textElements = elements.filter(el => {
-      return el?.query && queryParams.hasOwnProperty(el.query);
-    });
-
-    if (textElements.length === 0 && elements.length > 0) {
-      console.warn('  경고: 매칭되는 텍스트 요소가 없습니다.');
-      console.warn(`  사용 가능한 쿼리: ${elements.map(e => e.query).join(', ')}`);
-      console.warn(`  받은 쿼리: ${Object.keys(queryParams).join(', ')}`);
-    }
-
-    // 텍스트 그리기
-    textElements.forEach(element => {
-      const style = { ...defaultStyle, ...element.style };
-
-      // R2 폰트 사용 여부 (폰트가 실제로 등록되었을 때만)
-      if (element.useR2Font && fontSettings.mode === 'r2') {
-        // R2 폰트가 실제로 등록되었는지 확인
-        if (registeredFonts.has('CustomR2Font')) {
-          // 텍스트 삽입api3-2.js 방식: R2 폰트를 첫 번째로, 원래 fontFamily를 fallback으로
-          const originalFontFamily = style.fontFamily || defaultStyle.fontFamily || 'sans-serif';
-          style.fontFamily = `'CustomR2Font', ${originalFontFamily}`;
-          console.log(`[폰트] R2 폰트 사용 (fallback: ${originalFontFamily}): ${element.query}`);
-        } else {
-          console.warn(`[폰트] R2 폰트가 등록되지 않았습니다. 기본 폰트 사용: ${element.query}`);
-          // R2 폰트가 없으면 원래 fontFamily 또는 defaultStyle의 fontFamily 사용
-          style.fontFamily = style.fontFamily || defaultStyle.fontFamily || 'sans-serif';
-        }
-      } else {
-        // R2 폰트를 사용하지 않는 경우: 원래 fontFamily 사용
-        // 하지만 Canvas는 시스템 폰트만 인식하므로, 등록되지 않은 폰트 이름이면 기본값 사용
-        const systemFonts = ['sans-serif', 'serif', 'monospace', 'Arial', 'Times New Roman', 'Courier New', 'Helvetica', 'Verdana'];
-        const fontFamilyLower = (style.fontFamily || '').toLowerCase();
-        const isSystemFont = systemFonts.some(font => fontFamilyLower.includes(font.toLowerCase()));
+    timings.background = performance.now() - bgStart;
+    
+    // 이미지 로드 및 그리기
+    if (config.imageUrl) {
+      try {
+        const imgLoadStart = performance.now();
         
-        if (!style.fontFamily || style.fontFamily.trim() === '') {
-          style.fontFamily = defaultStyle.fontFamily || 'sans-serif';
-          console.log(`[폰트] fontFamily가 비어있어 기본값 사용: ${style.fontFamily} (${element.query})`);
-        } else if (!isSystemFont) {
-          // 등록되지 않은 폰트 이름이면 defaultStyle의 fontFamily 사용
-          style.fontFamily = defaultStyle.fontFamily || 'sans-serif';
-          console.warn(`[폰트] 등록되지 않은 폰트 이름 "${style.fontFamily}"를 기본 폰트로 대체: ${defaultStyle.fontFamily || 'sans-serif'} (${element.query})`);
+        // 이미지 버퍼가 있으면 사용, 없으면 URL에서 로드
+        let image;
+        if (imageBuffer) {
+          // 이미 다운로드된 버퍼 사용
+          image = await loadImage(imageBuffer);
+          timings.imageLoad = performance.now() - imgLoadStart;
+          console.log(`[이미지] 파싱 완료: ${timings.imageLoad.toFixed(2)}ms`);
         } else {
-          console.log(`[폰트] 시스템 폰트 사용: ${style.fontFamily} (${element.query})`);
+          // URL에서 직접 로드 (fallback)
+          image = await loadImage(config.imageUrl);
+          timings.imageLoad = performance.now() - imgLoadStart;
         }
+        
+        const imgDrawStart = performance.now();
+        const imgConfig = config.characterImage || {};
+        const imgLayout = imgConfig.layout || {};
+        const imgStyles = imgConfig.styles || {};
+        
+        const imgX = imgLayout.x || 10;
+        const imgY = imgLayout.y || 50;
+        const imgWidth = imgLayout.width || 100;
+        const imgHeight = imgLayout.height || 100;
+        const imgRadius = imgStyles.borderRadius || 50;
+        const imgBorderWidth = imgStyles.borderWidth || 2;
+        const imgBorderColor = imgStyles.borderColor || '#cccccc';
+        
+        // 이미지 그리기 (둥근 모서리)
+        drawRoundedImage(ctx, image, imgX, imgY, imgWidth, imgHeight, imgRadius);
+        
+        // 이미지 테두리 그리기
+        if (imgBorderWidth > 0) {
+          ctx.strokeStyle = imgBorderColor;
+          ctx.lineWidth = imgBorderWidth;
+          drawRoundedRect(ctx, imgX, imgY, imgWidth, imgHeight, imgRadius);
+          ctx.stroke();
+        }
+        timings.imageDraw = performance.now() - imgDrawStart;
+      } catch (imgError) {
+        console.error('[이미지] 로드 실패:', imgError.message);
+        // 이미지 로드 실패해도 계속 진행
       }
-
-      // 텍스트 가져오기 및 디코딩
-      const text = decodeText(queryParams[element.query]);
-      if (!text) {
-        console.warn(`  경고: ${element.query}에 대한 텍스트가 비어있습니다.`);
-        return;
-      }
-
-      console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-
-      // 요소 그리기 (배경, 필터, 테두리, 텍스트 모두 포함)
-      drawElementOnCanvas(ctx, text, style);
-    });
-    const canvasTime = performance.now() - canvasStart;
-    if (DEBUG) {
-      console.log(`[성능] Canvas 작업: ${canvasTime.toFixed(2)}ms`);
     }
+    
+    // 캐릭터 이름 그리기
+    const nameStart = performance.now();
+    const characterNameText = config.characterName || ''; // 최상위 문자열
+    const nameConfig = config.characterNameStyle || {}; // 스타일 객체
+    const nameLayout = nameConfig.layout || {};
+    const nameStyles = nameConfig.styles || {};
+    
+    // characterName이 문자열인지 확인
+    const nameText = typeof characterNameText === 'string' ? characterNameText : '';
+    
+    if (nameText) {
+      ctx.save();
+      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px "Malgun Gothic", sans-serif`;
+      ctx.fillStyle = nameStyles.color || '#000000';
+      ctx.textAlign = nameStyles.textAlign || 'left';
+      ctx.textBaseline = 'top';
+      
+      const nameX = nameLayout.x || 10;
+      const nameY = nameLayout.y || 10;
+      
+      ctx.fillText(nameText, nameX, nameY);
+      ctx.restore();
+    }
+    timings.characterName = performance.now() - nameStart;
+    
+    // 호감도 수치 그리기
+    const valueStart = performance.now();
+    const valueConfig = config.affectionValue || {};
+    const valueLayout = valueConfig.layout || {};
+    const valueStyles = valueConfig.styles || {};
+    const valueFormat = valueConfig.format || 'number';
+    const maxAffection = config.maxAffection || 100;
+    
+    ctx.save();
+    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px "Malgun Gothic", sans-serif`;
+    ctx.fillStyle = valueStyles.color || '#333';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    
+    const valueX = valueLayout.x || 200;
+    const valueY = valueLayout.y || 100;
+    const valueText = formatAffectionValue(value, maxAffection, valueFormat);
+    
+    ctx.fillText(valueText, valueX, valueY);
+    ctx.restore();
+    timings.affectionValue = performance.now() - valueStart;
+    
+    // 호감도 바 그리기
+    const barStart = performance.now();
+    const barConfig = config.affectionBar || {};
+    const barLayout = barConfig.layout || {};
+    const barStyles = barConfig.styles || {};
+    
+    const barX = barLayout.x || 200;
+    const barY = barLayout.y || 120;
+    const barWidth = barLayout.width || 180;
+    const barHeight = barLayout.height || 20;
+    const barRadius = barStyles.borderRadius || 10;
+    const barBgColor = barStyles.backgroundColor || '#e0e0e0';
+    const barFillColor = barStyles.fillColor || '#4CAF50';
+    
+    // 배경 바 그리기
+    ctx.fillStyle = barBgColor;
+    drawRoundedRect(ctx, barX, barY, barWidth, barHeight, barRadius);
+    ctx.fill();
+    
+    // 채움 바 그리기
+    const fillPercent = Math.min(100, Math.max(0, (value / maxAffection) * 100));
+    const fillWidth = (barWidth * fillPercent) / 100;
+    
+    if (fillWidth > 0) {
+      ctx.fillStyle = barFillColor;
+      drawRoundedRect(ctx, barX, barY, fillWidth, barHeight, barRadius);
+      ctx.fill();
+    }
+    timings.affectionBar = performance.now() - barStart;
+    
+    const renderTime = performance.now() - startTime;
+    timings.total = renderTime;
+    
+    // 성능 로그 출력
+    console.log('[성능] 렌더링 시간:');
+    if (timings.canvasCreate) console.log(`  - Canvas 생성: ${timings.canvasCreate.toFixed(2)}ms`);
+    if (timings.background) console.log(`  - 배경 그리기: ${timings.background.toFixed(2)}ms`);
+    if (timings.imageLoad) console.log(`  - 이미지 로드: ${timings.imageLoad.toFixed(2)}ms`);
+    if (timings.imageDraw) console.log(`  - 이미지 그리기: ${timings.imageDraw.toFixed(2)}ms`);
+    if (timings.characterName) console.log(`  - 캐릭터 이름: ${timings.characterName.toFixed(2)}ms`);
+    if (timings.affectionValue) console.log(`  - 호감도 수치: ${timings.affectionValue.toFixed(2)}ms`);
+    if (timings.affectionBar) console.log(`  - 호감도 바: ${timings.affectionBar.toFixed(2)}ms`);
+    console.log(`  - 총 렌더링 시간: ${timings.total.toFixed(2)}ms`);
+    
+    return canvas;
+  } catch (error) {
+    console.error('[렌더링] 오류:', error.message);
+    throw error;
+  }
+}
 
-    // WebP로 변환 (PNG 단계 건너뛰기)
+/**
+ * 메인 라우트: /{버킷}/{이름}.json?Value={호감도}
+ */
+app.get('/:bucket/:name.json', async (req, res) => {
+  const requestStart = performance.now();
+  const timings = {};
+  
+  try {
+    const bucket = req.params.bucket;
+    const name = req.params.name;
+    const value = parseInt(req.query.Value) || 0;
+    
+    console.log(`[요청] 버킷: ${bucket}, 이름: ${name}, 호감도: ${value}`);
+    
+    // JSON 파일 URL 생성
+    const jsonUrl = `${BASE_URL}/${bucket}/${name}.json`;
+    
+    // JSON과 이미지를 병렬로 가져오기 (JSON 먼저 가져와서 imageUrl 확인)
+    const fetchStart = performance.now();
+    console.log(`[JSON] 로드 시작: ${jsonUrl}`);
+    
+    const jsonRes = await fetch(jsonUrl, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0'
+      }
+    });
+    
+    if (!jsonRes.ok) {
+      throw new Error(`JSON 파일을 가져올 수 없습니다: ${jsonUrl} (${jsonRes.status})`);
+    }
+    
+    const config = await jsonRes.json();
+    timings.jsonLoad = performance.now() - fetchStart;
+    const jsonSize = JSON.stringify(config).length;
+    console.log(`[JSON] 로드 완료: ${timings.jsonLoad.toFixed(2)}ms (크기: ${jsonSize} bytes)`);
+    
+    // 이미지 URL이 있으면 이미지도 미리 가져오기
+    let imageBuffer = null;
+    if (config.imageUrl) {
+      const imgFetchStart = performance.now();
+      console.log(`[이미지] 다운로드 시작: ${config.imageUrl}`);
+      
+      try {
+        const imgRes = await fetch(config.imageUrl, {
+          headers: {
+            'Accept': 'image/*',
+            'User-Agent': 'Mozilla/5.0'
+          }
+        });
+        
+        if (!imgRes.ok) {
+          throw new Error(`이미지를 가져올 수 없습니다: ${config.imageUrl} (${imgRes.status})`);
+        }
+        imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+        timings.imageFetch = performance.now() - imgFetchStart;
+        console.log(`[이미지] 다운로드 완료: ${timings.imageFetch.toFixed(2)}ms (크기: ${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+      } catch (imgFetchError) {
+        console.error(`[이미지] 다운로드 실패: ${imgFetchError.message}`);
+        // 이미지 다운로드 실패해도 계속 진행 (렌더링에서 처리)
+      }
+    }
+    
+    // 호감도 창 렌더링 (이미지 버퍼 전달)
+    const renderStart = performance.now();
+    const canvas = await renderAffectionWindow(config, value, imageBuffer);
+    timings.render = performance.now() - renderStart;
+    
+    // WebP로 변환
     const webpStart = performance.now();
     const buffer = canvas.toBuffer('image/webp', { quality: 1 });
-    const webpTime = performance.now() - webpStart;
-    if (DEBUG) {
-      console.log(`[성능] WebP 변환: ${webpTime.toFixed(2)}ms`);
-    }
-
-    const totalTime = performance.now() - startTime;
-    if (DEBUG) {
-      console.log(`[성능] 총 처리 시간: ${totalTime.toFixed(2)}ms (${buffer.length} bytes)\n`);
-    }
+    timings.webpConvert = performance.now() - webpStart;
+    console.log(`[WebP] 변환 완료: ${timings.webpConvert.toFixed(2)}ms (크기: ${buffer.length} bytes)`);
+    
+    const totalTime = performance.now() - requestStart;
+    console.log(`[완료] 총 처리 시간: ${totalTime.toFixed(2)}ms`);
+    console.log('─'.repeat(60));
 
     // 응답 전송
     res.setHeader('Content-Type', 'image/webp');
@@ -736,14 +397,12 @@ app.get('/*', async (req, res) => {
 
   } catch (error) {
     console.error(`[${new Date().toISOString()}] 오류 발생:`, error.message);
+    if (DEBUG) {
     console.error(error.stack);
-    console.log('');
+    }
     
-    // 에러 이미지 URL에서 가져오기
-    const errorImageUrl = 'https://pub-45268c10da744ce58e66952c8d0c50ba.r2.dev/404.webp';
-    const errorImageRes = await fetch(errorImageUrl);
-    const errorBuffer = Buffer.from(await errorImageRes.arrayBuffer());
-    
+    // 에러 이미지 반환
+    const errorBuffer = createErrorImage(error.message);
     res.status(500);
     res.setHeader('Content-Type', 'image/webp');
     res.setHeader('Content-Length', errorBuffer.length);
@@ -751,7 +410,7 @@ app.get('/*', async (req, res) => {
   }
 });
 
-// 헬스 체크 (명시적 라우트)
+// 헬스 체크
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -761,14 +420,24 @@ app.get('/health', (req, res) => {
   });
 });
 
+// 루트 경로
+app.get('/', (req, res) => {
+  res.json({
+    service: 'Affection Window Canvas Generator',
+    usage: `GET /{bucket}/{name}.json?Value={affection_value}`,
+    example: `GET /mybucket/character1.json?Value=75`,
+    baseUrl: BASE_URL
+  });
+});
+
 // 서버 시작
 app.listen(PORT, () => {
   console.log('='.repeat(60));
-  console.log('이미지 텍스트 오버레이 서비스 시작');
+  console.log('호감도 창 Canvas 생성 서비스 시작');
   console.log('='.repeat(60));
   console.log(`서버 주소: http://localhost:${PORT}`);
   console.log(`Base URL: ${BASE_URL}`);
-  console.log(`예시 URL: http://localhost:${PORT}/kbd/A/A/EMO/A/1.webp?txt=테스트`);
+  console.log(`예시 URL: http://localhost:${PORT}/mybucket/character1.json?Value=75`);
   console.log('='.repeat(60));
   console.log('');
 });
