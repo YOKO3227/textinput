@@ -261,13 +261,12 @@ function drawElementOnCanvas(ctx, text, style) {
     shadow = parseBoxShadow(boxShadow);
     if (shadow && !shadow.inset) {
       // 그림자 오프셋과 blur를 고려한 패딩 계산
-      const maxOffset = Math.max(Math.abs(shadow.x), Math.abs(shadow.y));
-      const shadowExtent = shadow.blur + maxOffset;
+      // 각 방향별로 독립적으로 계산 (blur는 모든 방향으로 확장)
       shadowPadding = {
-        top: Math.max(0, shadowExtent - shadow.y),
-        right: Math.max(0, shadowExtent - shadow.x),
-        bottom: Math.max(0, shadowExtent + shadow.y),
-        left: Math.max(0, shadowExtent + shadow.x)
+        top: Math.max(0, shadow.blur - shadow.y),      // 위쪽: blur에서 y 오프셋 빼기
+        right: Math.max(0, shadow.blur - shadow.x),   // 오른쪽: blur에서 x 오프셋 빼기
+        bottom: Math.max(0, shadow.blur + shadow.y),   // 아래쪽: blur에 y 오프셋 더하기
+        left: Math.max(0, shadow.blur + shadow.x)      // 왼쪽: blur에 x 오프셋 더하기
       };
     }
   }
@@ -331,15 +330,33 @@ function drawElementOnCanvas(ctx, text, style) {
       }
     }
     
-    // 2. 그림자 적용 (배경 박스에 그림자 설정)
+    // 2. 그림자 그리기 (배경 박스 밖에만 그림자가 보이도록)
     if (shadow && !shadow.inset) {
+      // 그림자 설정
       bgCtx.shadowColor = shadow.color;
       bgCtx.shadowBlur = shadow.blur;
       bgCtx.shadowOffsetX = shadow.x;
       bgCtx.shadowOffsetY = shadow.y;
+      
+      // 그림자를 그리기 위해 투명한 배경 박스 그리기
+      // (실제로는 그림자만 그려짐)
+      bgCtx.fillStyle = 'rgba(0, 0, 0, 0.01)'; // 거의 투명하지만 그림자가 그려지도록
+      if (borderRadius) {
+        const radius = parseBorderRadius(borderRadius);
+        drawRoundedRect(bgCtx, boxX, boxY, w, h, radius);
+        bgCtx.fill();
+      } else {
+        bgCtx.fillRect(boxX, boxY, w, h);
+      }
+      
+      // 그림자 해제
+      bgCtx.shadowColor = 'transparent';
+      bgCtx.shadowBlur = 0;
+      bgCtx.shadowOffsetX = 0;
+      bgCtx.shadowOffsetY = 0;
     }
     
-    // 3. 배경색 그리기 (그림자 위에)
+    // 3. 배경색 그리기 (그림자 위에 덮어서 배경 박스 안쪽에 그림자가 보이지 않도록)
     if (backgroundColor) {
       const rgba = parseRgba(backgroundColor);
       if (rgba) {
@@ -355,14 +372,6 @@ function drawElementOnCanvas(ctx, text, style) {
       } else {
         bgCtx.fillRect(boxX, boxY, w, h);
       }
-    }
-    
-    // 4. 그림자 해제 (테두리는 그림자 없이)
-    if (shadow && !shadow.inset) {
-      bgCtx.shadowColor = 'transparent';
-      bgCtx.shadowBlur = 0;
-      bgCtx.shadowOffsetX = 0;
-      bgCtx.shadowOffsetY = 0;
     }
     
     // 5. 테두리 그리기
