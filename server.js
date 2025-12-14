@@ -225,7 +225,7 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     
     if (nameText) {
       ctx.save();
-      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px "Malgun Gothic", sans-serif`;
+      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px "Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif`;
       ctx.fillStyle = nameStyles.color || '#000000';
       ctx.textAlign = nameStyles.textAlign || 'left';
       ctx.textBaseline = 'top';
@@ -247,7 +247,7 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     const maxAffection = config.maxAffection || 100;
     
     ctx.save();
-    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px "Malgun Gothic", sans-serif`;
+    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px "Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif`;
     ctx.fillStyle = valueStyles.color || '#333';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
