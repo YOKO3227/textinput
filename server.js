@@ -291,42 +291,40 @@ function drawElementOnCanvas(ctx, text, style) {
     const boxX = offsetX;
     const boxY = offsetY;
     
-    // 1. 블러 효과 처리 (backdrop-filter 효과)
-    // 메인 Canvas에서 배경 박스 영역의 이미지를 가져와서 블러 처리
-    if (filter) {
-      const blurMatch = filter.match(/blur\(([\d.]+)px\)/);
-      if (blurMatch && ctx.canvas) {
-        try {
-          // 회전이 적용되기 전의 원본 Canvas에서 직접 추출
-          // ctx.save()가 호출되었지만 아직 회전이 적용되지 않았으므로
-          // 원본 좌표계에서 추출 가능
-          const mainCanvas = ctx.canvas;
-          const originalCtx = mainCanvas.getContext('2d');
+    // 1. 필터 효과 처리 (backdrop-filter 효과)
+    // 메인 Canvas에서 배경 박스 영역의 이미지를 가져와서 필터 적용
+    if (filter && ctx.canvas) {
+      try {
+        // 회전이 적용되기 전의 원본 Canvas에서 직접 추출
+        // ctx.save()가 호출되었지만 아직 회전이 적용되지 않았으므로
+        // 원본 좌표계에서 추출 가능
+        const mainCanvas = ctx.canvas;
+        const originalCtx = mainCanvas.getContext('2d');
+        
+        // 원본 Canvas에서 이미지 영역 추출
+        const imageData = originalCtx.getImageData(x, y, w, h);
+        const filterCanvas = createCanvas(w, h);
+        const filterCtx = filterCanvas.getContext('2d');
+        filterCtx.putImageData(imageData, 0, 0);
+        
+        // 필터 적용 (blur, brightness, contrast, saturate 등 모든 필터)
+        if (filterCtx.filter !== undefined) {
+          // 필터를 적용하려면 다시 그려야 함
+          const tempCanvas = createCanvas(w, h);
+          const tempCtx = tempCanvas.getContext('2d');
+          tempCtx.drawImage(filterCanvas, 0, 0);
           
-          // 원본 Canvas에서 이미지 영역 추출
-          const imageData = originalCtx.getImageData(x, y, w, h);
-          const blurCanvas = createCanvas(w, h);
-          const blurCtx = blurCanvas.getContext('2d');
-          blurCtx.putImageData(imageData, 0, 0);
+          filterCtx.clearRect(0, 0, w, h);
+          // 필터 문자열 전체 적용 (blur, brightness, contrast, saturate 등)
+          filterCtx.filter = filter;
+          filterCtx.drawImage(tempCanvas, 0, 0);
           
-          // 블러 필터 적용
-          if (blurCtx.filter !== undefined) {
-            // 블러를 적용하려면 다시 그려야 함
-            const tempCanvas = createCanvas(w, h);
-            const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.drawImage(blurCanvas, 0, 0);
-            
-            blurCtx.clearRect(0, 0, w, h);
-            blurCtx.filter = `blur(${blurMatch[1]}px)`;
-            blurCtx.drawImage(tempCanvas, 0, 0);
-            
-            // 블러 처리된 이미지를 bgCanvas에 그리기 (배경 박스 위치에)
-            bgCtx.drawImage(blurCanvas, boxX, boxY);
-          }
-        } catch (e) {
-          // getImageData 실패 시 무시 (회전 등으로 인한 경우)
-          console.warn('[블러] 이미지 추출 실패:', e.message);
+          // 필터 처리된 이미지를 bgCanvas에 그리기 (배경 박스 위치에)
+          bgCtx.drawImage(filterCanvas, boxX, boxY);
         }
+      } catch (e) {
+        // getImageData 실패 시 무시 (회전 등으로 인한 경우)
+        console.warn('[필터] 이미지 추출 실패:', e.message);
       }
     }
     
