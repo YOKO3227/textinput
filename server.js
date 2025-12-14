@@ -265,22 +265,14 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     timings.background = performance.now() - bgStart;
     
     // 이미지 로드 및 그리기
-    if (config.imageUrl) {
+    if (imageBuffer) {
       try {
         const imgLoadStart = performance.now();
         
-        // 이미지 버퍼가 있으면 사용, 없으면 URL에서 로드
-        let image;
-        if (imageBuffer) {
-          // 이미 다운로드된 버퍼 사용
-          image = await loadImage(imageBuffer);
-          timings.imageLoad = performance.now() - imgLoadStart;
-          console.log(`[이미지] 파싱 완료: ${timings.imageLoad.toFixed(2)}ms`);
-        } else {
-          // URL에서 직접 로드 (fallback)
-          image = await loadImage(config.imageUrl);
-          timings.imageLoad = performance.now() - imgLoadStart;
-        }
+        // 이미지 버퍼 사용
+        const image = await loadImage(imageBuffer);
+        timings.imageLoad = performance.now() - imgLoadStart;
+        console.log(`[이미지] 파싱 완료: ${timings.imageLoad.toFixed(2)}ms`);
         
         const imgDrawStart = performance.now();
         const imgConfig = config.characterImage || {};
@@ -310,6 +302,8 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
         console.error('[이미지] 로드 실패:', imgError.message);
         // 이미지 로드 실패해도 계속 진행
       }
+    } else {
+      console.warn('[이미지] 이미지 버퍼가 없습니다.');
     }
     
     // 캐릭터 이름 그리기
@@ -413,26 +407,38 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
 }
 
 /**
- * 메인 라우트: /{버킷}/{이름}.json?Value={호감도}
+ * 메인 라우트: /{버킷}/{이름}_Love_Value={호감도}
  */
-app.get('/:bucket/:name.json', async (req, res) => {
+app.get('/:bucket/*', async (req, res) => {
   const requestStart = performance.now();
   const timings = {};
   
   try {
     const bucket = req.params.bucket;
-    const name = req.params.name;
-    const value = parseInt(req.query.Value) || 0;
+    // 와일드카드 경로에서 {name}_Love_Value={value} 형식 파싱
+    const wildcardPath = req.params[0]; // Express에서 *는 req.params[0]에 저장됨
+    
+    // {name}_Love_Value={value} 형식 파싱
+    const match = wildcardPath.match(/^(.+?)_Love_Value=(.+)$/);
+    if (!match) {
+      throw new Error(`잘못된 URL 형식입니다. 형식: /{bucket}/{name}_Love_Value={value}`);
+    }
+    
+    const name = match[1];
+    const value = parseInt(match[2]) || 0;
     
     console.log(`[요청] 버킷: ${bucket}, 이름: ${name}, 호감도: ${value}`);
     
-    // JSON 파일 URL 생성
-    const jsonUrl = `${BASE_URL}/${bucket}/${name}.json`;
+    // 기본 경로 설정
+    const basePath = `${BASE_URL}/${bucket}/${name}`;
+    const jsonUrl = `${basePath}/setting.json`;
+    const imageUrl = `${basePath}/image.webp`;
     
-    // JSON과 이미지를 병렬로 가져오기 (JSON 먼저 가져와서 imageUrl 확인)
+    // JSON, 이미지, 폰트를 병렬로 가져오기
     const fetchStart = performance.now();
-    console.log(`[JSON] 로드 시작: ${jsonUrl}`);
+    console.log(`[리소스] 로드 시작: ${basePath}`);
     
+    // JSON 먼저 가져와서 폰트 설정 확인
     const jsonRes = await fetch(jsonUrl, {
       headers: {
         'Accept': 'application/json',
@@ -449,17 +455,25 @@ app.get('/:bucket/:name.json', async (req, res) => {
     const jsonSize = JSON.stringify(config).length;
     console.log(`[JSON] 로드 완료: ${timings.jsonLoad.toFixed(2)}ms (크기: ${jsonSize} bytes)`);
     
-    // 폰트 로드 (R2 폰트 모드인 경우)
+    // 폰트 설정 확인
     const fontSettings = config.fontSettings || {};
-    if (fontSettings.mode === 'r2' && fontSettings.r2FontFilename) {
-      try {
-        // R2 폰트 URL 생성 (버킷 내 fonts/ 폴더)
-        const fontPath = `fonts/${fontSettings.r2FontFilename}`;
-        const fontUrl = `${BASE_URL}/${bucket}/${fontPath}`;
-        
-        // 폰트 등록 (CustomR2Font라는 이름으로 등록)
-        await registerFontFromUrl(fontUrl, 'CustomR2Font');
-        
+    const fontUrl = fontSettings.mode === 'r2' && fontSettings.r2FontFilename
+      ? `${basePath}/fonts/${fontSettings.r2FontFilename}`
+      : null;
+
+    // 이미지와 폰트를 병렬로 가져오기
+    const loadStart = performance.now();
+    const [imageRes, fontLoaded] = await Promise.all([
+      fetch(imageUrl, {
+        headers: {
+          'Accept': 'image/*',
+          'User-Agent': 'Mozilla/5.0'
+        }
+      }).catch(err => {
+        console.error(`[이미지] 다운로드 실패: ${err.message}`);
+        return null; // 이미지 실패해도 계속 진행
+      }),
+      fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').then(() => {
         // 폰트 패밀리 업데이트 (R2 폰트 사용)
         if (!fontSettings.nameFontFamily || fontSettings.nameFontFamily.includes('CustomR2Font')) {
           config.fontSettings.nameFontFamily = 'CustomR2Font';
@@ -467,37 +481,22 @@ app.get('/:bucket/:name.json', async (req, res) => {
         if (!fontSettings.valueFontFamily || fontSettings.valueFontFamily.includes('CustomR2Font')) {
           config.fontSettings.valueFontFamily = 'CustomR2Font';
         }
-      } catch (fontError) {
-        console.error(`[폰트] 로드 실패: ${fontError.message}`);
+        return true;
+      }).catch(err => {
+        console.error(`[폰트] 로드 실패: ${err.message}`);
         console.warn(`[폰트] 기본 폰트를 사용합니다.`);
-        // 폰트 로드 실패해도 계속 진행
-      }
-    }
+        return false; // 폰트 실패해도 계속 진행
+      }) : Promise.resolve(false)
+    ]);
     
-    // 이미지 URL이 있으면 이미지도 미리 가져오기
+    // 이미지 버퍼 처리
     let imageBuffer = null;
-    if (config.imageUrl) {
-      const imgFetchStart = performance.now();
-      console.log(`[이미지] 다운로드 시작: ${config.imageUrl}`);
-      
-      try {
-        const imgRes = await fetch(config.imageUrl, {
-          headers: {
-            'Accept': 'image/*',
-            'User-Agent': 'Mozilla/5.0'
-          }
-        });
-        
-        if (!imgRes.ok) {
-          throw new Error(`이미지를 가져올 수 없습니다: ${config.imageUrl} (${imgRes.status})`);
-        }
-        imageBuffer = Buffer.from(await imgRes.arrayBuffer());
-        timings.imageFetch = performance.now() - imgFetchStart;
-        console.log(`[이미지] 다운로드 완료: ${timings.imageFetch.toFixed(2)}ms (크기: ${(imageBuffer.length / 1024).toFixed(2)}KB)`);
-      } catch (imgFetchError) {
-        console.error(`[이미지] 다운로드 실패: ${imgFetchError.message}`);
-        // 이미지 다운로드 실패해도 계속 진행 (렌더링에서 처리)
-      }
+    if (imageRes && imageRes.ok) {
+      imageBuffer = Buffer.from(await imageRes.arrayBuffer());
+      timings.imageFetch = performance.now() - loadStart;
+      console.log(`[이미지] 다운로드 완료: ${timings.imageFetch.toFixed(2)}ms (크기: ${(imageBuffer.length / 1024).toFixed(2)}KB)`);
+    } else {
+      console.warn(`[이미지] 이미지를 가져올 수 없습니다: ${imageUrl}`);
     }
     
     // 호감도 창 렌더링 (이미지 버퍼 전달)
@@ -550,9 +549,16 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     service: 'Affection Window Canvas Generator',
-    usage: `GET /{bucket}/{name}.json?Value={affection_value}`,
-    example: `GET /mybucket/character1.json?Value=75`,
-    baseUrl: BASE_URL
+    usage: `GET /{bucket}/{name}_Love_Value={affection_value}`,
+    example: `GET /mybucket/character1_Love_Value=75`,
+    baseUrl: BASE_URL,
+    fileStructure: {
+      '{bucket}/{name}/': {
+        'setting.json': '설정 파일',
+        'image.webp': '캐릭터 이미지',
+        'fonts/{r2FontFilename}': 'R2 폰트 파일 (선택사항)'
+      }
+    }
   });
 });
 
@@ -563,7 +569,7 @@ app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log(`서버 주소: http://localhost:${PORT}`);
   console.log(`Base URL: ${BASE_URL}`);
-  console.log(`예시 URL: http://localhost:${PORT}/mybucket/character1.json?Value=75`);
+  console.log(`예시 URL: http://localhost:${PORT}/mybucket/character1_Love_Value=75`);
   console.log('='.repeat(60));
   console.log('');
 });
