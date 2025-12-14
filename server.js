@@ -216,12 +216,28 @@ function getFontFamily(config, elementType) {
   const fontSettings = config.fontSettings || {};
   const defaultFont = '"Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif';
   
+  let fontFamily;
   if (elementType === 'name') {
-    return fontSettings.nameFontFamily || defaultFont;
+    fontFamily = fontSettings.nameFontFamily || defaultFont;
   } else if (elementType === 'value') {
-    return fontSettings.valueFontFamily || defaultFont;
+    fontFamily = fontSettings.valueFontFamily || defaultFont;
+  } else {
+    fontFamily = defaultFont;
   }
-  return defaultFont;
+  
+  // R2 폰트 모드이고 CustomR2Font가 등록되어 있으면 사용
+  if (fontSettings.mode === 'r2' && registeredFonts.has('CustomR2Font')) {
+    // 폰트 패밀리가 CustomR2Font이거나, 기본값이거나, CustomR2Font를 포함하면 사용
+    if (fontFamily === 'CustomR2Font' || 
+        fontFamily === defaultFont || 
+        fontFamily.includes('CustomR2Font') ||
+        !fontFamily || fontFamily.trim() === '') {
+      return 'CustomR2Font';
+    }
+  }
+  
+  // 폰트 패밀리에서 따옴표 제거 (Canvas는 따옴표 없이 사용)
+  return fontFamily.replace(/['"]/g, '');
 }
 
 /**
@@ -473,21 +489,29 @@ app.get('/:bucket/*', async (req, res) => {
         console.error(`[이미지] 다운로드 실패: ${err.message}`);
         return null; // 이미지 실패해도 계속 진행
       }),
-      fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').then(() => {
-        // 폰트 패밀리 업데이트 (R2 폰트 사용)
-        if (!fontSettings.nameFontFamily || fontSettings.nameFontFamily.includes('CustomR2Font')) {
-          config.fontSettings.nameFontFamily = 'CustomR2Font';
-        }
-        if (!fontSettings.valueFontFamily || fontSettings.valueFontFamily.includes('CustomR2Font')) {
-          config.fontSettings.valueFontFamily = 'CustomR2Font';
-        }
-        return true;
-      }).catch(err => {
+      fontUrl ? registerFontFromUrl(fontUrl, 'CustomR2Font').catch(err => {
         console.error(`[폰트] 로드 실패: ${err.message}`);
+        console.error(`[폰트] URL: ${fontUrl}`);
         console.warn(`[폰트] 기본 폰트를 사용합니다.`);
-        return false; // 폰트 실패해도 계속 진행
-      }) : Promise.resolve(false)
+        return null; // 폰트 로드 실패해도 계속 진행
+      }) : Promise.resolve(null)
     ]);
+    
+    // 폰트가 성공적으로 로드된 경우 폰트 패밀리 업데이트
+    if (fontLoaded !== null && fontSettings.mode === 'r2' && registeredFonts.has('CustomR2Font')) {
+      // R2 폰트 사용 시 폰트 패밀리를 CustomR2Font로 설정
+      if (!config.fontSettings) {
+        config.fontSettings = {};
+      }
+      // nameFontFamily가 설정되지 않았거나 기본값이면 CustomR2Font 사용
+      if (!fontSettings.nameFontFamily || fontSettings.nameFontFamily.includes('Noto') || fontSettings.nameFontFamily.includes('DejaVu')) {
+        config.fontSettings.nameFontFamily = 'CustomR2Font';
+      }
+      // valueFontFamily가 설정되지 않았거나 기본값이면 CustomR2Font 사용
+      if (!fontSettings.valueFontFamily || fontSettings.valueFontFamily.includes('Noto') || fontSettings.valueFontFamily.includes('DejaVu')) {
+        config.fontSettings.valueFontFamily = 'CustomR2Font';
+      }
+    }
     
     // 이미지 버퍼 처리
     let imageBuffer = null;
