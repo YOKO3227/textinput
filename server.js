@@ -210,34 +210,46 @@ function createErrorImage(message) {
 }
 
 /**
- * 폰트 설정에서 폰트 패밀리 가져오기
+ * 폰트 패밀리 처리 (textinput 방식)
  */
-function getFontFamily(config, elementType) {
-  const fontSettings = config.fontSettings || {};
-  const defaultFont = '"Noto Sans CJK KR", "DejaVu Sans", "Liberation Sans", sans-serif';
+function processFontFamily(style, defaultStyle, fontSettings, elementType) {
+  // 기본 폰트 패밀리 가져오기 (textinput 방식: style.fontFamily 우선, 없으면 defaultStyle.fontFamily)
+  let fontFamily = style.fontFamily || defaultStyle.fontFamily || 'sans-serif';
   
-  let fontFamily;
-  if (elementType === 'name') {
-    fontFamily = fontSettings.nameFontFamily || defaultFont;
-  } else if (elementType === 'value') {
-    fontFamily = fontSettings.valueFontFamily || defaultFont;
-  } else {
-    fontFamily = defaultFont;
-  }
-  
-  // R2 폰트 모드이고 CustomR2Font가 등록되어 있으면 사용
-  if (fontSettings.mode === 'r2' && registeredFonts.has('CustomR2Font')) {
-    // 폰트 패밀리가 CustomR2Font이거나, 기본값이거나, CustomR2Font를 포함하면 사용
-    if (fontFamily === 'CustomR2Font' || 
-        fontFamily === defaultFont || 
-        fontFamily.includes('CustomR2Font') ||
-        !fontFamily || fontFamily.trim() === '') {
-      return 'CustomR2Font';
+  // elementType에 따라 fontSettings에서 폰트 패밀리 가져오기 (style에 없을 때만)
+  if (!style.fontFamily) {
+    if (elementType === 'name' && fontSettings.nameFontFamily) {
+      fontFamily = fontSettings.nameFontFamily;
+    } else if (elementType === 'value' && fontSettings.valueFontFamily) {
+      fontFamily = fontSettings.valueFontFamily;
     }
   }
   
-  // 폰트 패밀리에서 따옴표 제거 (Canvas는 따옴표 없이 사용)
-  return fontFamily.replace(/['"]/g, '');
+  // R2 폰트 사용 여부 (폰트가 실제로 등록되었을 때만)
+  if (fontSettings.mode === 'r2' && registeredFonts.has('CustomR2Font')) {
+    // R2 폰트를 첫 번째로, 원래 fontFamily를 fallback으로 (textinput 방식)
+    const originalFontFamily = fontFamily.replace(/['"]/g, '');
+    return `CustomR2Font, ${originalFontFamily}`;
+  } else {
+    // R2 폰트를 사용하지 않는 경우: 원래 fontFamily 사용
+    // Canvas는 시스템 폰트만 인식하므로, 등록되지 않은 폰트 이름이면 기본값 사용
+    const systemFonts = ['sans-serif', 'serif', 'monospace', 'Arial', 'Times New Roman', 'Courier New', 'Helvetica', 'Verdana', 'CustomR2Font'];
+    const fontFamilyLower = fontFamily.toLowerCase().replace(/['"]/g, '');
+    const isSystemFont = systemFonts.some(font => fontFamilyLower.includes(font.toLowerCase()));
+    
+    if (!fontFamily || fontFamily.trim() === '') {
+      const defaultFont = defaultStyle.fontFamily || 'sans-serif';
+      return defaultFont.replace(/['"]/g, '');
+    } else if (!isSystemFont && !registeredFonts.has(fontFamily.replace(/['"]/g, ''))) {
+      // 등록되지 않은 폰트 이름이면 defaultStyle의 fontFamily 사용
+      const defaultFont = defaultStyle.fontFamily || 'sans-serif';
+      console.warn(`[폰트] 등록되지 않은 폰트 이름 "${fontFamily}"를 기본 폰트로 대체: ${defaultFont}`);
+      return defaultFont.replace(/['"]/g, '');
+    } else {
+      // 폰트 패밀리에서 따옴표 제거 (Canvas는 따옴표 없이 사용)
+      return fontFamily.replace(/['"]/g, '');
+    }
+  }
 }
 
 /**
@@ -328,16 +340,24 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     const nameConfig = config.characterNameStyle || {}; // 스타일 객체
     const nameLayout = nameConfig.layout || {};
     const nameStyles = nameConfig.styles || {};
+    const defaultStyle = config.defaultStyle || {};
+    const fontSettings = config.fontSettings || {};
     
     // characterName이 문자열인지 확인
     const nameText = typeof characterNameText === 'string' ? characterNameText : '';
     
     if (nameText) {
       ctx.save();
-      const nameFontFamily = getFontFamily(config, 'name');
-      ctx.font = `${nameStyles.fontWeight || 'bold'} ${nameStyles.fontSize || 20}px ${nameFontFamily}`;
-      ctx.fillStyle = nameStyles.color || '#000000';
-      ctx.textAlign = nameStyles.textAlign || 'left';
+      
+      // 스타일 병합 (textinput 방식)
+      const nameStyle = { ...defaultStyle, ...nameStyles };
+      
+      // 폰트 패밀리 처리 (textinput 방식)
+      const nameFontFamily = processFontFamily(nameStyle, defaultStyle, fontSettings, 'name');
+      
+      ctx.font = `${nameStyle.fontWeight || 'bold'} ${nameStyle.fontSize || 20}px ${nameFontFamily}`;
+      ctx.fillStyle = nameStyle.fill || nameStyle.color || '#000000';
+      ctx.textAlign = nameStyle.textAlign || 'left';
       ctx.textBaseline = 'top';
       
       const nameX = nameLayout.x || 10;
@@ -357,9 +377,15 @@ async function renderAffectionWindow(config, value, imageBuffer = null) {
     const maxAffection = config.maxAffection || 100;
     
     ctx.save();
-    const valueFontFamily = getFontFamily(config, 'value');
-    ctx.font = `${valueStyles.fontWeight || 'normal'} ${valueStyles.fontSize || 18}px ${valueFontFamily}`;
-    ctx.fillStyle = valueStyles.color || '#333';
+    
+    // 스타일 병합 (textinput 방식)
+    const valueStyle = { ...defaultStyle, ...valueStyles };
+    
+    // 폰트 패밀리 처리 (textinput 방식)
+    const valueFontFamily = processFontFamily(valueStyle, defaultStyle, fontSettings, 'value');
+    
+    ctx.font = `${valueStyle.fontWeight || 'normal'} ${valueStyle.fontSize || 18}px ${valueFontFamily}`;
+    ctx.fillStyle = valueStyle.fill || valueStyle.color || '#333';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     
@@ -497,20 +523,9 @@ app.get('/:bucket/*', async (req, res) => {
       }) : Promise.resolve(null)
     ]);
     
-    // 폰트가 성공적으로 로드된 경우 폰트 패밀리 업데이트
+    // 폰트가 성공적으로 로드된 경우 로그만 출력 (폰트 패밀리는 processFontFamily에서 처리)
     if (fontLoaded !== null && fontSettings.mode === 'r2' && registeredFonts.has('CustomR2Font')) {
-      // R2 폰트 사용 시 폰트 패밀리를 CustomR2Font로 설정
-      if (!config.fontSettings) {
-        config.fontSettings = {};
-      }
-      // nameFontFamily가 설정되지 않았거나 기본값이면 CustomR2Font 사용
-      if (!fontSettings.nameFontFamily || fontSettings.nameFontFamily.includes('Noto') || fontSettings.nameFontFamily.includes('DejaVu')) {
-        config.fontSettings.nameFontFamily = 'CustomR2Font';
-      }
-      // valueFontFamily가 설정되지 않았거나 기본값이면 CustomR2Font 사용
-      if (!fontSettings.valueFontFamily || fontSettings.valueFontFamily.includes('Noto') || fontSettings.valueFontFamily.includes('DejaVu')) {
-        config.fontSettings.valueFontFamily = 'CustomR2Font';
-      }
+      console.log(`[폰트] R2 폰트가 성공적으로 등록되었습니다: CustomR2Font`);
     }
     
     // 이미지 버퍼 처리
