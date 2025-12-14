@@ -622,6 +622,16 @@ app.get('/*', async (req, res) => {
     if (DEBUG) {
       console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
     }
+    
+    // R2 폰트가 성공적으로 로드되었는지 확인
+    const r2FontAvailable = fontUrl && fontLoaded !== null && registeredFonts.has('CustomR2Font');
+    if (fontUrl) {
+      if (r2FontAvailable) {
+        console.log(`[폰트] R2 폰트 사용 가능: CustomR2Font`);
+      } else {
+        console.warn(`[폰트] R2 폰트를 사용할 수 없습니다. 기본 폰트를 사용합니다.`);
+      }
+    }
 
     // Canvas 생성
     const canvasStart = performance.now();
@@ -658,9 +668,13 @@ app.get('/*', async (req, res) => {
     textElements.forEach(element => {
       const style = { ...defaultStyle, ...element.style };
 
-      // R2 폰트 사용 여부
-      if (element.useR2Font && fontSettings.mode === 'r2') {
+      // R2 폰트 사용 여부 (폰트가 실제로 등록되었을 때만)
+      if (element.useR2Font && fontSettings.mode === 'r2' && r2FontAvailable) {
         style.fontFamily = 'CustomR2Font';
+        console.log(`[폰트] R2 폰트 사용: ${element.query}`);
+      } else if (element.useR2Font && fontSettings.mode === 'r2' && !r2FontAvailable) {
+        console.warn(`[폰트] R2 폰트를 사용하려고 했지만 사용할 수 없습니다. 기본 폰트 사용: ${element.query}`);
+        // style.fontFamily는 원래 값(JSON의 fontFamily 또는 defaultStyle)을 유지
       }
 
       // 텍스트 가져오기 및 디코딩
