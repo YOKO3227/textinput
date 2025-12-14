@@ -316,7 +316,6 @@ function drawElementOnCanvas(ctx, text, style) {
   // 텍스트 그리기
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   ctx.fillStyle = fill;
-  ctx.textAlign = textAlign;
   ctx.textBaseline = 'top';
 
   // 줄바꿈 처리
@@ -369,12 +368,19 @@ function drawElementOnCanvas(ctx, text, style) {
     startY = textY + Math.max(0, textHeight - totalHeight);
   }
 
-  // 수평 정렬
-  let textXPos = textX;
+  // 수평 정렬 계산 (패딩을 고려한 영역 기준)
+  // ctx.textAlign을 먼저 설정해야 fillText의 x 좌표 의미가 올바르게 적용됨
+  ctx.textAlign = textAlign;
+  let textXPos;
   if (textAlign === 'center') {
+    // 패딩을 고려한 영역의 중심점
     textXPos = textX + textWidth / 2;
   } else if (textAlign === 'right') {
+    // 패딩을 고려한 영역의 오른쪽 끝
     textXPos = textX + textWidth;
+  } else {
+    // 'left' 또는 기본값: 패딩을 고려한 영역의 왼쪽 시작
+    textXPos = textX;
   }
 
   // 각 줄 그리기
@@ -622,16 +628,6 @@ app.get('/*', async (req, res) => {
     if (DEBUG) {
       console.log(`[성능] 이미지/폰트 로드: ${loadTime.toFixed(2)}ms`);
     }
-    
-    // R2 폰트가 성공적으로 로드되었는지 확인
-    const r2FontAvailable = fontUrl && fontLoaded !== null && registeredFonts.has('CustomR2Font');
-    if (fontUrl) {
-      if (r2FontAvailable) {
-        console.log(`[폰트] R2 폰트 사용 가능: CustomR2Font`);
-      } else {
-        console.warn(`[폰트] R2 폰트를 사용할 수 없습니다. 기본 폰트를 사용합니다.`);
-      }
-    }
 
     // Canvas 생성
     const canvasStart = performance.now();
@@ -668,13 +664,9 @@ app.get('/*', async (req, res) => {
     textElements.forEach(element => {
       const style = { ...defaultStyle, ...element.style };
 
-      // R2 폰트 사용 여부 (폰트가 실제로 등록되었을 때만)
-      if (element.useR2Font && fontSettings.mode === 'r2' && r2FontAvailable) {
+      // R2 폰트 사용 여부
+      if (element.useR2Font && fontSettings.mode === 'r2') {
         style.fontFamily = 'CustomR2Font';
-        console.log(`[폰트] R2 폰트 사용: ${element.query}`);
-      } else if (element.useR2Font && fontSettings.mode === 'r2' && !r2FontAvailable) {
-        console.warn(`[폰트] R2 폰트를 사용하려고 했지만 사용할 수 없습니다. 기본 폰트 사용: ${element.query}`);
-        // style.fontFamily는 원래 값(JSON의 fontFamily 또는 defaultStyle)을 유지
       }
 
       // 텍스트 가져오기 및 디코딩
