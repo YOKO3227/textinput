@@ -266,23 +266,13 @@ function drawElementOnCanvas(ctx, text, style) {
     }
   }
 
-  // 그림자 적용 (배경 그리기 전에 설정)
-  let shadowApplied = false;
-  if (boxShadow) {
-    const shadow = parseBoxShadow(boxShadow);
-    if (shadow && !shadow.inset) {
-      ctx.shadowColor = shadow.color;
-      ctx.shadowBlur = shadow.blur;
-      ctx.shadowOffsetX = shadow.x;
-      ctx.shadowOffsetY = shadow.y;
-      shadowApplied = true;
-    }
-  }
-
-  // 필터 적용 (배경에만 적용하기 위해 별도 Canvas 사용)
+  // 배경/테두리/그림자/필터를 위한 별도 Canvas 생성
+  // (배경에만 그림자와 필터를 적용하기 위해)
   let bgCanvas = null;
   let bgCtx = null;
-  if (filter || backgroundColor || borderRadius || borderWidth) {
+  const needsBgCanvas = filter || backgroundColor || borderRadius || borderWidth || boxShadow;
+  
+  if (needsBgCanvas) {
     bgCanvas = createCanvas(w, h);
     bgCtx = bgCanvas.getContext('2d');
     
@@ -290,10 +280,21 @@ function drawElementOnCanvas(ctx, text, style) {
     if (filter && bgCtx.filter !== undefined) {
       bgCtx.filter = filter;
     }
+    
+    // 그림자 적용 (bgCtx에 설정해야 배경에 그림자가 적용됨)
+    if (boxShadow) {
+      const shadow = parseBoxShadow(boxShadow);
+      if (shadow && !shadow.inset) {
+        bgCtx.shadowColor = shadow.color;
+        bgCtx.shadowBlur = shadow.blur;
+        bgCtx.shadowOffsetX = shadow.x;
+        bgCtx.shadowOffsetY = shadow.y;
+      }
+    }
   }
 
   // 배경 그리기
-  if (backgroundColor || bgCanvas) {
+  if (needsBgCanvas || backgroundColor) {
     const targetCtx = bgCtx || ctx;
     
     if (backgroundColor) {
@@ -316,19 +317,77 @@ function drawElementOnCanvas(ctx, text, style) {
     }
 
     // 테두리 그리기
-    if (borderWidth && borderWidth > 0) {
+    if (borderWidth) {
       const borderW = parseFloat(String(borderWidth).replace('px', '')) || 0;
       if (borderW > 0) {
         targetCtx.strokeStyle = borderColor || '#000000';
         targetCtx.lineWidth = borderW;
         
-        if (borderRadius) {
-          const radius = parseBorderRadius(borderRadius);
-          drawRoundedRect(targetCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-          targetCtx.stroke();
+        // 테두리 스타일 적용
+        if (borderStyle === 'dashed') {
+          const dashLength = borderW * 3;
+          const gapLength = borderW * 2;
+          targetCtx.setLineDash([dashLength, gapLength]);
+        } else if (borderStyle === 'dotted') {
+          const dotSize = borderW;
+          const gapLength = borderW * 2;
+          targetCtx.setLineDash([dotSize, gapLength]);
+        } else if (borderStyle === 'double') {
+          // 이중선: 안쪽과 바깥쪽 두 번 그리기
+          const doubleGap = borderW / 3;
+          const singleLineWidth = borderW / 3;
+          
+          targetCtx.setLineDash([]);
+          targetCtx.lineWidth = singleLineWidth;
+          
+          // 바깥쪽
+          if (borderRadius) {
+            const radius = parseBorderRadius(borderRadius);
+            drawRoundedRect(targetCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
+            targetCtx.stroke();
+          } else {
+            targetCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+          }
+          
+          // 안쪽
+          if (borderRadius) {
+            const radius = parseBorderRadius(borderRadius);
+            drawRoundedRect(targetCtx, borderW / 2 + doubleGap, borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2, Math.max(0, radius - borderW / 2 - doubleGap));
+            targetCtx.stroke();
+          } else {
+            targetCtx.strokeRect(borderW / 2 + doubleGap, borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2);
+          }
+          
+          // lineWidth 복원
+          targetCtx.lineWidth = borderW;
         } else {
-          targetCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+          // solid (실선) 또는 기본값
+          targetCtx.setLineDash([]);
+          
+          if (borderRadius) {
+            const radius = parseBorderRadius(borderRadius);
+            drawRoundedRect(targetCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
+            targetCtx.stroke();
+          } else {
+            targetCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+          }
         }
+        
+        // LineDash 초기화 (double이 아닌 경우에만)
+        if (borderStyle !== 'double') {
+          targetCtx.setLineDash([]);
+        }
+      }
+    }
+    
+    // 그림자 해제 (배경 그리기 완료 후)
+    if (boxShadow && bgCtx) {
+      const shadow = parseBoxShadow(boxShadow);
+      if (shadow && !shadow.inset) {
+        bgCtx.shadowColor = 'transparent';
+        bgCtx.shadowBlur = 0;
+        bgCtx.shadowOffsetX = 0;
+        bgCtx.shadowOffsetY = 0;
       }
     }
 
@@ -338,14 +397,6 @@ function drawElementOnCanvas(ctx, text, style) {
       ctx.filter = 'none';
       ctx.drawImage(bgCanvas, x, y);
     }
-  }
-
-  // 그림자 해제 (텍스트에는 그림자 적용 안 함)
-  if (shadowApplied) {
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
   }
 
   // 패딩 계산
