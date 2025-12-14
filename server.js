@@ -112,121 +112,9 @@ function decodeText(text) {
 }
 
 /**
- * RGBA 문자열 파싱 (예: "rgba(255, 0, 0, 0.7)" -> {r, g, b, a})
+ * Canvas에 텍스트 그리기 (여러 줄 지원, 정렬 지원)
  */
-function parseRgba(rgbaString) {
-  if (!rgbaString) return null;
-  const match = rgbaString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-  if (match) {
-    return {
-      r: parseInt(match[1]),
-      g: parseInt(match[2]),
-      b: parseInt(match[3]),
-      a: match[4] ? parseFloat(match[4]) : 1
-    };
-  }
-  return null;
-}
-
-/**
- * Padding 문자열 파싱 (예: "12px 16px" -> {top: 12, right: 16, bottom: 12, left: 16})
- */
-function parsePadding(paddingString) {
-  if (!paddingString) return { top: 0, right: 0, bottom: 0, left: 0 };
-  const values = paddingString.match(/(\d+)px/g);
-  if (!values || values.length === 0) return { top: 0, right: 0, bottom: 0, left: 0 };
-  
-  const nums = values.map(v => parseInt(v));
-  if (nums.length === 1) {
-    return { top: nums[0], right: nums[0], bottom: nums[0], left: nums[0] };
-  } else if (nums.length === 2) {
-    return { top: nums[0], right: nums[1], bottom: nums[0], left: nums[1] };
-  } else if (nums.length === 4) {
-    return { top: nums[0], right: nums[1], bottom: nums[2], left: nums[3] };
-  }
-  return { top: 0, right: 0, bottom: 0, left: 0 };
-}
-
-/**
- * BorderRadius 파싱 (예: "8px" -> 8)
- */
-function parseBorderRadius(borderRadiusString) {
-  if (!borderRadiusString) return 0;
-  const match = borderRadiusString.match(/(\d+)px/);
-  return match ? parseInt(match[1]) : 0;
-}
-
-/**
- * Rotation 파싱 (예: "45deg" -> 45도 in radians)
- */
-function degToRad(deg) {
-  return (deg * Math.PI) / 180;
-}
-
-function parseRotation(rotationString) {
-  if (!rotationString) return 0;
-  const match = rotationString.match(/([\d.-]+)deg/);
-  return match ? degToRad(parseFloat(match[1])) : 0;
-}
-
-/**
- * BoxShadow 파싱 (예: "0px 2px 8px 0px rgba(0, 0, 0, 0.3)" -> {x, y, blur, spread, color})
- */
-function parseBoxShadow(boxShadowString) {
-  if (!boxShadowString) return null;
-  // "0px 2px 8px 0px rgba(0, 0, 0, 0.3)" 또는 "inset 0px 2px 8px 0px rgba(0, 0, 0, 0.3)"
-  const parts = boxShadowString.trim().split(/\s+/);
-  let inset = false;
-  let offset = 0;
-  
-  if (parts[0] === 'inset') {
-    inset = true;
-    offset = 1;
-  }
-  
-  if (parts.length < offset + 4) return null;
-  
-  const x = parseFloat(parts[offset].replace('px', '')) || 0;
-  const y = parseFloat(parts[offset + 1].replace('px', '')) || 0;
-  const blur = parseFloat(parts[offset + 2].replace('px', '')) || 0;
-  const spread = parseFloat(parts[offset + 3].replace('px', '')) || 0;
-  
-  // 색상 추출 (나머지 부분)
-  let colorStr = parts.slice(offset + 4).join(' ');
-  if (!colorStr) colorStr = 'rgba(0, 0, 0, 0.5)';
-  
-  const rgba = parseRgba(colorStr);
-  const color = rgba ? `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})` : colorStr;
-  
-  return { x, y, blur, spread, color, inset };
-}
-
-/**
- * 둥근 사각형 그리기
- */
-function drawRoundedRect(ctx, x, y, width, height, radius) {
-  ctx.beginPath();
-  if (radius <= 0) {
-    ctx.rect(x, y, width, height);
-    return;
-  }
-  
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + width - radius, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-  ctx.lineTo(x + width, y + height - radius);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  ctx.lineTo(x + radius, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
-
-/**
- * Canvas에 요소 그리기 (배경, 필터, 회전, 테두리, 그림자, 텍스트 모두 지원)
- */
-function drawElementOnCanvas(ctx, text, style) {
+function drawTextOnCanvas(ctx, text, style) {
   const {
     x = 0,
     y = 0,
@@ -240,258 +128,12 @@ function drawElementOnCanvas(ctx, text, style) {
     strokeWidth = 0,
     textAlign = 'left',
     lineHeight = 1.2,
-    fontWeight = 'normal',
-    backgroundColor,
-    padding,
-    borderRadius,
-    rotation,
-    borderWidth,
-    borderStyle,
-    borderColor,
-    boxShadow,
-    filter
+    fontWeight = 'normal'
   } = style;
 
   ctx.save();
 
-  // 그림자 정보 파싱 (크기 계산을 위해 먼저)
-  let shadow = null;
-  let shadowPadding = { top: 0, right: 0, bottom: 0, left: 0 };
-  if (boxShadow) {
-    shadow = parseBoxShadow(boxShadow);
-    if (shadow && !shadow.inset) {
-      // 그림자 오프셋과 blur를 고려한 패딩 계산
-      // 각 방향별로 독립적으로 계산 (blur는 모든 방향으로 확장)
-      shadowPadding = {
-        top: Math.max(0, shadow.blur - shadow.y),      // 위쪽: blur에서 y 오프셋 빼기
-        right: Math.max(0, shadow.blur - shadow.x),   // 오른쪽: blur에서 x 오프셋 빼기
-        bottom: Math.max(0, shadow.blur + shadow.y),   // 아래쪽: blur에 y 오프셋 더하기
-        left: Math.max(0, shadow.blur + shadow.x)      // 왼쪽: blur에 x 오프셋 더하기
-      };
-    }
-  }
-
-  // 배경/테두리/그림자/필터를 위한 별도 Canvas 생성
-  // 그림자 오프셋과 blur를 고려해서 크기 확장
-  let bgCanvas = null;
-  let bgCtx = null;
-  const needsBgCanvas = filter || backgroundColor || borderRadius || borderWidth || boxShadow;
-  
-  if (needsBgCanvas) {
-    // 그림자를 고려한 Canvas 크기 계산
-    const canvasWidth = w + shadowPadding.left + shadowPadding.right;
-    const canvasHeight = h + shadowPadding.top + shadowPadding.bottom;
-    const offsetX = shadowPadding.left;
-    const offsetY = shadowPadding.top;
-    
-    bgCanvas = createCanvas(canvasWidth, canvasHeight);
-    bgCtx = bgCanvas.getContext('2d');
-    
-    // 배경 박스 위치를 그림자 패딩만큼 오프셋
-    const boxX = offsetX;
-    const boxY = offsetY;
-    
-    // 1. 필터 효과 처리 (backdrop-filter 효과)
-    // 메인 Canvas에서 배경 박스 영역의 이미지를 가져와서 필터 적용
-    if (filter && ctx.canvas) {
-      try {
-        // 회전이 적용되기 전의 원본 Canvas에서 직접 추출
-        // ctx.save()가 호출되었지만 아직 회전이 적용되지 않았으므로
-        // 원본 좌표계에서 추출 가능
-        const mainCanvas = ctx.canvas;
-        const originalCtx = mainCanvas.getContext('2d');
-        
-        // 원본 Canvas에서 이미지 영역 추출
-        const imageData = originalCtx.getImageData(x, y, w, h);
-        const filterCanvas = createCanvas(w, h);
-        const filterCtx = filterCanvas.getContext('2d');
-        filterCtx.putImageData(imageData, 0, 0);
-        
-        // 필터 적용 (blur, brightness, contrast, saturate 등 모든 필터)
-        if (filterCtx.filter !== undefined) {
-          // 필터를 적용하려면 다시 그려야 함
-          const tempCanvas = createCanvas(w, h);
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCtx.drawImage(filterCanvas, 0, 0);
-          
-          filterCtx.clearRect(0, 0, w, h);
-          // 필터 문자열 전체 적용 (blur, brightness, contrast, saturate 등)
-          filterCtx.filter = filter;
-          filterCtx.drawImage(tempCanvas, 0, 0);
-          
-          // 필터 처리된 이미지를 bgCanvas에 그리기 (배경 박스 위치에)
-          bgCtx.drawImage(filterCanvas, boxX, boxY);
-        }
-      } catch (e) {
-        // getImageData 실패 시 무시 (회전 등으로 인한 경우)
-        console.warn('[필터] 이미지 추출 실패:', e.message);
-      }
-    }
-    
-    // 2. 그림자 그리기 (배경 박스 밖에만 그림자가 보이도록)
-    if (shadow && !shadow.inset) {
-      // 그림자 설정
-      bgCtx.shadowColor = shadow.color;
-      bgCtx.shadowBlur = shadow.blur;
-      bgCtx.shadowOffsetX = shadow.x;
-      bgCtx.shadowOffsetY = shadow.y;
-      
-      // 그림자를 그리기 위해 투명한 배경 박스 그리기
-      // (실제로는 그림자만 그려짐)
-      bgCtx.fillStyle = 'rgba(0, 0, 0, 0.01)'; // 거의 투명하지만 그림자가 그려지도록
-      if (borderRadius) {
-        const radius = parseBorderRadius(borderRadius);
-        drawRoundedRect(bgCtx, boxX, boxY, w, h, radius);
-        bgCtx.fill();
-      } else {
-        bgCtx.fillRect(boxX, boxY, w, h);
-      }
-      
-      // 그림자 해제
-      bgCtx.shadowColor = 'transparent';
-      bgCtx.shadowBlur = 0;
-      bgCtx.shadowOffsetX = 0;
-      bgCtx.shadowOffsetY = 0;
-    }
-    
-    // 3. 배경색 그리기 (그림자 위에 덮어서 배경 박스 안쪽에 그림자가 보이지 않도록)
-    if (backgroundColor) {
-      const rgba = parseRgba(backgroundColor);
-      if (rgba) {
-        bgCtx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
-      } else {
-        bgCtx.fillStyle = backgroundColor;
-      }
-      
-      if (borderRadius) {
-        const radius = parseBorderRadius(borderRadius);
-        drawRoundedRect(bgCtx, boxX, boxY, w, h, radius);
-        bgCtx.fill();
-      } else {
-        bgCtx.fillRect(boxX, boxY, w, h);
-      }
-    }
-    
-    // 5. 테두리 그리기
-    if (borderWidth) {
-      const borderW = parseFloat(String(borderWidth).replace('px', '')) || 0;
-      if (borderW > 0) {
-        bgCtx.strokeStyle = borderColor || '#000000';
-        bgCtx.lineWidth = borderW;
-        
-        // 테두리 스타일 적용
-        if (borderStyle === 'dashed') {
-          const dashLength = borderW * 3;
-          const gapLength = borderW * 2;
-          bgCtx.setLineDash([dashLength, gapLength]);
-        } else if (borderStyle === 'dotted') {
-          const dotSize = borderW;
-          const gapLength = borderW * 2;
-          bgCtx.setLineDash([dotSize, gapLength]);
-        } else if (borderStyle === 'double') {
-          // 이중선: 안쪽과 바깥쪽 두 번 그리기
-          const doubleGap = borderW / 3;
-          const singleLineWidth = borderW / 3;
-          
-          bgCtx.setLineDash([]);
-          bgCtx.lineWidth = singleLineWidth;
-          
-          // 바깥쪽
-          if (borderRadius) {
-            const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(bgCtx, boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-            bgCtx.stroke();
-          } else {
-            bgCtx.strokeRect(boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW);
-          }
-          
-          // 안쪽
-          if (borderRadius) {
-            const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(bgCtx, boxX + borderW / 2 + doubleGap, boxY + borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2, Math.max(0, radius - borderW / 2 - doubleGap));
-            bgCtx.stroke();
-          } else {
-            bgCtx.strokeRect(boxX + borderW / 2 + doubleGap, boxY + borderW / 2 + doubleGap, w - borderW - doubleGap * 2, h - borderW - doubleGap * 2);
-          }
-          
-          // lineWidth 복원
-          bgCtx.lineWidth = borderW;
-        } else {
-          // solid (실선) 또는 기본값
-          bgCtx.setLineDash([]);
-          
-          if (borderRadius) {
-            const radius = parseBorderRadius(borderRadius);
-            drawRoundedRect(bgCtx, boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
-            bgCtx.stroke();
-          } else {
-            bgCtx.strokeRect(boxX + borderW / 2, boxY + borderW / 2, w - borderW, h - borderW);
-          }
-        }
-        
-        // LineDash 초기화 (double이 아닌 경우에만)
-        if (borderStyle !== 'double') {
-          bgCtx.setLineDash([]);
-        }
-      }
-    }
-
-    // 6. 회전 적용 (배경을 그린 후 회전)
-    if (rotation) {
-      const rotationRad = parseRotation(rotation);
-      if (rotationRad !== 0) {
-        const centerX = x + w / 2;
-        const centerY = y + h / 2;
-        ctx.translate(centerX, centerY);
-        ctx.rotate(rotationRad);
-        ctx.translate(-centerX, -centerY);
-      }
-    }
-    
-    // 7. 필터가 적용된 배경을 메인 Canvas에 복사
-    // 그림자 패딩을 고려해서 위치 조정
-    ctx.filter = 'none';
-    ctx.drawImage(bgCanvas, x - shadowPadding.left, y - shadowPadding.top);
-  } else {
-    // bgCanvas가 없는 경우 (배경색만 있거나 아무것도 없는 경우)
-    // 회전 적용
-    if (rotation) {
-      const rotationRad = parseRotation(rotation);
-      if (rotationRad !== 0) {
-        const centerX = x + w / 2;
-        const centerY = y + h / 2;
-        ctx.translate(centerX, centerY);
-        ctx.rotate(rotationRad);
-        ctx.translate(-centerX, -centerY);
-      }
-    }
-    
-    if (backgroundColor) {
-      const rgba = parseRgba(backgroundColor);
-      if (rgba) {
-        ctx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
-      } else {
-        ctx.fillStyle = backgroundColor;
-      }
-      
-      if (borderRadius) {
-        const radius = parseBorderRadius(borderRadius);
-        drawRoundedRect(ctx, x, y, w, h, radius);
-        ctx.fill();
-      } else {
-        ctx.fillRect(x, y, w, h);
-      }
-    }
-  }
-
-  // 패딩 계산
-  const paddingValues = parsePadding(padding);
-  const textX = x + paddingValues.left;
-  const textY = y + paddingValues.top;
-  const textWidth = w - paddingValues.left - paddingValues.right;
-  const textHeight = h - paddingValues.top - paddingValues.bottom;
-
-  // 텍스트 그리기
+  // 폰트 설정
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   ctx.fillStyle = fill;
   ctx.textAlign = textAlign;
@@ -505,14 +147,14 @@ function drawElementOnCanvas(ctx, text, style) {
   const measuredLines = [];
   lines.forEach(line => {
     const metrics = ctx.measureText(line);
-    if (metrics.width > textWidth && textWidth > 0) {
+    if (metrics.width > w && w > 0) {
       // 자동 줄바꿈
       const words = line.split(' ');
       let currentLine = '';
       words.forEach(word => {
         const testLine = currentLine + (currentLine ? ' ' : '') + word;
         const testMetrics = ctx.measureText(testLine);
-        if (testMetrics.width > textWidth && currentLine) {
+        if (testMetrics.width > w && currentLine) {
           measuredLines.push(currentLine);
           currentLine = word;
         } else {
@@ -528,19 +170,19 @@ function drawElementOnCanvas(ctx, text, style) {
   const totalHeight = measuredLines.length * lineHeightPx;
 
   // 수직 정렬
-  let startY = textY;
+  let startY = y;
   if (verticalAlign === 'middle' || verticalAlign === 'center') {
-    startY = textY + Math.max(0, (textHeight - totalHeight) / 2);
+    startY = y + Math.max(0, (h - totalHeight) / 2);
   } else if (verticalAlign === 'bottom') {
-    startY = textY + Math.max(0, textHeight - totalHeight);
+    startY = y + Math.max(0, h - totalHeight);
   }
 
   // 수평 정렬
-  let textXPos = textX;
+  let textX = x;
   if (textAlign === 'center') {
-    textXPos = textX + textWidth / 2;
+    textX = x + w / 2;
   } else if (textAlign === 'right') {
-    textXPos = textX + textWidth;
+    textX = x + w;
   }
 
   // 각 줄 그리기
@@ -551,11 +193,11 @@ function drawElementOnCanvas(ctx, text, style) {
     if (strokeWidth > 0 && stroke) {
       ctx.strokeStyle = stroke;
       ctx.lineWidth = strokeWidth;
-      ctx.strokeText(line, textXPos, lineY);
+      ctx.strokeText(line, textX, lineY);
     }
 
     // Fill (텍스트)
-    ctx.fillText(line, textXPos, lineY);
+    ctx.fillText(line, textX, lineY);
   });
 
   ctx.restore();
@@ -838,8 +480,8 @@ app.get('/*', async (req, res) => {
 
       console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
 
-      // 요소 그리기 (배경, 필터, 회전, 테두리, 그림자, 텍스트 모두 포함)
-      drawElementOnCanvas(ctx, text, style);
+      // 텍스트 그리기
+      drawTextOnCanvas(ctx, text, style);
     });
     const canvasTime = performance.now() - canvasStart;
     if (DEBUG) {
