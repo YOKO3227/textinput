@@ -112,9 +112,76 @@ function decodeText(text) {
 }
 
 /**
- * Canvas에 텍스트 그리기 (여러 줄 지원, 정렬 지원)
+ * RGBA 문자열 파싱 (예: "rgba(255, 0, 0, 0.7)" -> {r, g, b, a})
  */
-function drawTextOnCanvas(ctx, text, style) {
+function parseRgba(rgbaString) {
+  if (!rgbaString) return null;
+  const match = rgbaString.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  if (match) {
+    return {
+      r: parseInt(match[1]),
+      g: parseInt(match[2]),
+      b: parseInt(match[3]),
+      a: match[4] ? parseFloat(match[4]) : 1
+    };
+  }
+  return null;
+}
+
+/**
+ * Padding 문자열 파싱 (예: "12px 16px" -> {top: 12, right: 16, bottom: 12, left: 16})
+ */
+function parsePadding(paddingString) {
+  if (!paddingString) return { top: 0, right: 0, bottom: 0, left: 0 };
+  const values = paddingString.match(/(\d+)px/g);
+  if (!values || values.length === 0) return { top: 0, right: 0, bottom: 0, left: 0 };
+  
+  const nums = values.map(v => parseInt(v));
+  if (nums.length === 1) {
+    return { top: nums[0], right: nums[0], bottom: nums[0], left: nums[0] };
+  } else if (nums.length === 2) {
+    return { top: nums[0], right: nums[1], bottom: nums[0], left: nums[1] };
+  } else if (nums.length === 4) {
+    return { top: nums[0], right: nums[1], bottom: nums[2], left: nums[3] };
+  }
+  return { top: 0, right: 0, bottom: 0, left: 0 };
+}
+
+/**
+ * BorderRadius 파싱 (예: "8px" -> 8)
+ */
+function parseBorderRadius(borderRadiusString) {
+  if (!borderRadiusString) return 0;
+  const match = borderRadiusString.match(/(\d+)px/);
+  return match ? parseInt(match[1]) : 0;
+}
+
+/**
+ * 둥근 사각형 그리기
+ */
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  if (radius <= 0) {
+    ctx.rect(x, y, width, height);
+    return;
+  }
+  
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+/**
+ * Canvas에 요소 그리기 (배경, 필터, 테두리, 텍스트 지원)
+ */
+function drawElementOnCanvas(ctx, text, style) {
   const {
     x = 0,
     y = 0,
@@ -128,61 +195,186 @@ function drawTextOnCanvas(ctx, text, style) {
     strokeWidth = 0,
     textAlign = 'left',
     lineHeight = 1.2,
-    fontWeight = 'normal'
+    fontWeight = 'normal',
+    backgroundColor,
+    padding,
+    borderRadius,
+    borderWidth,
+    borderColor = '#000000',
+    filter,
+    whiteSpace = 'pre-wrap'
   } = style;
 
   ctx.save();
 
-  // 폰트 설정
+  // 배경/테두리/필터를 위한 별도 Canvas 생성
+  let bgCanvas = null;
+  let bgCtx = null;
+  const needsBgCanvas = filter || backgroundColor || borderRadius || borderWidth;
+  
+  if (needsBgCanvas) {
+    bgCanvas = createCanvas(w, h);
+    bgCtx = bgCanvas.getContext('2d');
+    
+    // 1. 배경색 먼저 그리기 (필터보다 먼저)
+    if (backgroundColor) {
+      const rgba = parseRgba(backgroundColor);
+      if (rgba) {
+        bgCtx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
+      } else {
+        bgCtx.fillStyle = backgroundColor;
+      }
+      
+      if (borderRadius) {
+        const radius = parseBorderRadius(borderRadius);
+        drawRoundedRect(bgCtx, 0, 0, w, h, radius);
+        bgCtx.fill();
+      } else {
+        bgCtx.fillRect(0, 0, w, h);
+      }
+    }
+    
+    // 2. 필터 효과 처리 (배경색 위에 필터 적용된 이미지 합성)
+    if (filter && ctx.canvas) {
+      try {
+        const mainCanvas = ctx.canvas;
+        const originalCtx = mainCanvas.getContext('2d');
+        
+        // 원본 Canvas에서 이미지 영역 추출
+        const imageData = originalCtx.getImageData(x, y, w, h);
+        const filterCanvas = createCanvas(w, h);
+        const filterCtx = filterCanvas.getContext('2d');
+        filterCtx.putImageData(imageData, 0, 0);
+        
+        // 필터 적용
+        if (filterCtx.filter !== undefined) {
+          const tempCanvas = createCanvas(w, h);
+          const tempCtx = tempCanvas.getContext('2d');
+          tempCtx.drawImage(filterCanvas, 0, 0);
+          
+          filterCtx.clearRect(0, 0, w, h);
+          filterCtx.filter = filter;
+          filterCtx.drawImage(tempCanvas, 0, 0);
+          
+          // 배경색 위에 필터 적용된 이미지 합성
+          bgCtx.globalCompositeOperation = 'source-over';
+          bgCtx.drawImage(filterCanvas, 0, 0);
+        }
+      } catch (e) {
+        console.warn('[필터] 이미지 추출 실패:', e.message);
+      }
+    }
+    
+    // 3. 테두리 그리기 (항상 solid)
+    if (borderWidth) {
+      const borderW = parseFloat(String(borderWidth).replace('px', '')) || 0;
+      if (borderW > 0) {
+        bgCtx.strokeStyle = borderColor || '#000000';
+        bgCtx.lineWidth = borderW;
+        bgCtx.setLineDash([]);
+        
+        if (borderRadius) {
+          const radius = parseBorderRadius(borderRadius);
+          drawRoundedRect(bgCtx, borderW / 2, borderW / 2, w - borderW, h - borderW, Math.max(0, radius - borderW / 2));
+          bgCtx.stroke();
+        } else {
+          bgCtx.strokeRect(borderW / 2, borderW / 2, w - borderW, h - borderW);
+        }
+      }
+    }
+    
+    // 배경을 메인 Canvas에 복사
+    ctx.filter = 'none';
+    ctx.drawImage(bgCanvas, x, y);
+  } else {
+    // bgCanvas가 없는 경우 (배경색만 있거나 아무것도 없는 경우)
+    if (backgroundColor) {
+      const rgba = parseRgba(backgroundColor);
+      if (rgba) {
+        ctx.fillStyle = `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})`;
+      } else {
+        ctx.fillStyle = backgroundColor;
+      }
+      
+      if (borderRadius) {
+        const radius = parseBorderRadius(borderRadius);
+        drawRoundedRect(ctx, x, y, w, h, radius);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y, w, h);
+      }
+    }
+  }
+
+  // 패딩 계산
+  const paddingValues = parsePadding(padding);
+  const textX = x + paddingValues.left;
+  const textY = y + paddingValues.top;
+  const textWidth = w - paddingValues.left - paddingValues.right;
+  const textHeight = h - paddingValues.top - paddingValues.bottom;
+
+  // 텍스트 그리기
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   ctx.fillStyle = fill;
   ctx.textAlign = textAlign;
   ctx.textBaseline = 'top';
 
   // 줄바꿈 처리
-  const lines = text.split('\n');
+  let lines;
+  if (whiteSpace === 'pre' || whiteSpace === 'pre-wrap') {
+    lines = text.split('\n');
+  } else if (whiteSpace === 'nowrap') {
+    lines = [text];
+  } else {
+    lines = text.split('\n');
+  }
+  
   const lineHeightPx = fontSize * lineHeight;
 
   // 자동 줄바꿈 처리
   const measuredLines = [];
   lines.forEach(line => {
-    const metrics = ctx.measureText(line);
-    if (metrics.width > w && w > 0) {
-      // 자동 줄바꿈
-      const words = line.split(' ');
-      let currentLine = '';
-      words.forEach(word => {
-        const testLine = currentLine + (currentLine ? ' ' : '') + word;
-        const testMetrics = ctx.measureText(testLine);
-        if (testMetrics.width > w && currentLine) {
-          measuredLines.push(currentLine);
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      });
-      if (currentLine) measuredLines.push(currentLine);
-    } else {
+    if (whiteSpace === 'nowrap' || whiteSpace === 'pre') {
       measuredLines.push(line);
+    } else {
+      const metrics = ctx.measureText(line);
+      if (metrics.width > textWidth && textWidth > 0) {
+        // 자동 줄바꿈
+        const words = line.split(' ');
+        let currentLine = '';
+        words.forEach(word => {
+          const testLine = currentLine + (currentLine ? ' ' : '') + word;
+          const testMetrics = ctx.measureText(testLine);
+          if (testMetrics.width > textWidth && currentLine) {
+            measuredLines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = testLine;
+          }
+        });
+        if (currentLine) measuredLines.push(currentLine);
+      } else {
+        measuredLines.push(line);
+      }
     }
   });
 
   const totalHeight = measuredLines.length * lineHeightPx;
 
   // 수직 정렬
-  let startY = y;
+  let startY = textY;
   if (verticalAlign === 'middle' || verticalAlign === 'center') {
-    startY = y + Math.max(0, (h - totalHeight) / 2);
+    startY = textY + Math.max(0, (textHeight - totalHeight) / 2);
   } else if (verticalAlign === 'bottom') {
-    startY = y + Math.max(0, h - totalHeight);
+    startY = textY + Math.max(0, textHeight - totalHeight);
   }
 
   // 수평 정렬
-  let textX = x;
+  let textXPos = textX;
   if (textAlign === 'center') {
-    textX = x + w / 2;
+    textXPos = textX + textWidth / 2;
   } else if (textAlign === 'right') {
-    textX = x + w;
+    textXPos = textX + textWidth;
   }
 
   // 각 줄 그리기
@@ -193,11 +385,11 @@ function drawTextOnCanvas(ctx, text, style) {
     if (strokeWidth > 0 && stroke) {
       ctx.strokeStyle = stroke;
       ctx.lineWidth = strokeWidth;
-      ctx.strokeText(line, textX, lineY);
+      ctx.strokeText(line, textXPos, lineY);
     }
 
     // Fill (텍스트)
-    ctx.fillText(line, textX, lineY);
+    ctx.fillText(line, textXPos, lineY);
   });
 
   ctx.restore();
@@ -480,8 +672,8 @@ app.get('/*', async (req, res) => {
 
       console.log(`  텍스트 그리기: ${element.query} = "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
 
-      // 텍스트 그리기
-      drawTextOnCanvas(ctx, text, style);
+      // 요소 그리기 (배경, 필터, 테두리, 텍스트 모두 포함)
+      drawElementOnCanvas(ctx, text, style);
     });
     const canvasTime = performance.now() - canvasStart;
     if (DEBUG) {
